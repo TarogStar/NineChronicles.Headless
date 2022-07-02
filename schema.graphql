@@ -11,15 +11,25 @@ type Action {
 
 type ActionMutation {
   createAvatar(avatarName: String!, avatarIndex: Int!, hairIndex: Int!, lensIndex: Int!, earIndex: Int!, tailIndex: Int!): TxId!
-  hackAndSlash(avatarAddress: Address!, worldId: Int!, stageId: Int!, weeklyArenaAddress: Address!, rankingArenaAddress: Address!, costumeIds: [Guid], equipmentIds: [Guid], consumableIds: [Guid]): TxId!
+  hackAndSlash(avatarAddress: Address!, worldId: Int!, stageId: Int!, costumeIds: [Guid], equipmentIds: [Guid], consumableIds: [Guid]): TxId!
   combinationEquipment(avatarAddress: Address!, recipeId: Int!, slotIndex: Int!, subRecipeId: Int): TxId!
   itemEnhancement(avatarAddress: Address!, itemId: Guid!, materialId: Guid!, slotIndex: Int!): TxId!
-  buy(sellerAgentAddress: Address!, sellerAvatarAddress: Address!, buyerAvatarAddress: Address!, productId: Guid!): TxId!
-  sell(sellerAvatarAddress: Address!, itemId: Guid!, price: Int!): TxId!
   dailyReward(avatarAddress: Address!): TxId!
+  chargeActionPoint(avatarAddress: Address!): TxId!
   combinationConsumable(avatarAddress: Address!, recipeId: Int!, slotIndex: Int!): TxId!
   monsterCollect(level: Int!): TxId!
   claimMonsterCollectionReward(avatarAddress: Address!): TxId!
+}
+
+type ActionQuery {
+  stake(amount: BigInt): ByteString
+  claimStakeReward(avatarAddress: Address): ByteString
+  migrateMonsterCollection(avatarAddress: Address): ByteString!
+  grinding(avatarAddress: Address!, equipmentIds: [Guid]!, chargeAp: Boolean): ByteString
+  unlockEquipmentRecipe(avatarAddress: Address!, recipeIds: [Int]!): ByteString
+  unlockWorld(avatarAddress: Address!, worldIds: [Int]!): ByteString
+  transferAsset(sender: Address!, recipient: Address!, amount: String!, currency: CurrencyEnum!, memo: String): ByteString
+  patchTableSheet(tableName: String!, tableCsv: String!): ByteString!
 }
 
 type ActivationStatusMutation {
@@ -28,6 +38,7 @@ type ActivationStatusMutation {
 
 type ActivationStatusQuery {
   activated: Boolean!
+  addressActivated(address: Address!): Boolean!
 }
 
 scalar Address
@@ -39,6 +50,7 @@ type AgentStateType {
   monsterCollectionRound: Long!
   monsterCollectionLevel: Long!
   hasTradedItem: Boolean!
+  crystal: String!
 }
 
 type AppProtocolVersionType {
@@ -49,13 +61,10 @@ type AppProtocolVersionType {
 }
 
 type ArenaInfoType {
-  avatarAddress: Address!
   agentAddress: Address!
+  avatarAddress: Address!
   avatarName: String!
   arenaRecord: ArenaRecordType!
-  level: Int!
-  combatPoint: Int!
-  armorId: Int!
   active: Boolean!
   dailyChallengeCount: Int!
   score: Int!
@@ -73,7 +82,6 @@ type AvatarStateType {
   characterId: Int!
   dailyRewardReceivedIndex: Long!
   agentAddress: Address!
-  rankingMapAddress: Address!
   updatedAt: Long!
   name: String!
   exp: Int!
@@ -103,9 +111,11 @@ type Block {
   totalDifficulty: BigInt!
   nonce: ByteString!
   miner: Address!
+  publicKey: PublicKey
   previousBlock: Block
   timestamp: DateTimeOffset!
-  stateRootHash: ByteString
+  stateRootHash: ByteString!
+  signature: ByteString
   transactions: [Transaction!]!
 }
 
@@ -146,6 +156,20 @@ type CostumeType {
   elementalType: ElementalType!
   itemId: Guid!
   equipped: Boolean!
+}
+
+type CrystalMonsterCollectionMultiplierRowType {
+  level: Int!
+  multiplier: Int!
+}
+
+type CrystalMonsterCollectionMultiplierSheetType {
+  orderedList: [CrystalMonsterCollectionMultiplierRowType!]!
+}
+
+enum CurrencyEnum {
+  CRYSTAL
+  NCG
 }
 
 scalar DateTimeOffset
@@ -195,16 +219,23 @@ type ExplorerQuery {
 
 type FungibleAssetValueType {
   currency: String!
-  quantity: Decimal!
+  quantity: String!
 }
 
 scalar Guid
+
+type InventoryItemType {
+  count: Int!
+  id: Int!
+  itemType: ItemType!
+}
 
 type InventoryType {
   consumables: [ConsumableType!]!
   materials: [MaterialType!]!
   equipments: [EquipmentType!]!
   costumes: [CostumeType!]!
+  items(inventoryItemId: Int!): [InventoryItemType!]!
 }
 
 enum ItemSubType {
@@ -306,6 +337,8 @@ type MonsterCollectionStateType {
 type MonsterCollectionStatusType {
   fungibleAssetValue: FungibleAssetValueType!
   rewardInfos: [MonsterCollectionRewardInfoType]
+  tipIndex: Long!
+  lockup: Boolean!
 }
 
 type NodeExceptionType {
@@ -321,10 +354,11 @@ type NodeStatusType {
   bootstrapEnded: Boolean!
   preloadEnded: Boolean!
   tip: BlockHeader!
-  topmostBlocks(limit: Int!, miner: Address): [BlockHeader]!
+  topmostBlocks(limit: Int!, offset: Int = 0, miner: Address): [BlockHeader]!
   stagedTxIds(address: Address): [TxId]
   genesis: BlockHeader!
   isMining: Boolean!
+  appProtocolVersion: AppProtocolVersionType
 }
 
 enum NotificationEnum {
@@ -339,6 +373,19 @@ enum NotificationEnum {
 type NotificationType {
   type: NotificationEnum!
   message: String
+}
+
+type OrderDigestType {
+  orderId: Guid!
+  tradableId: Guid!
+  startedBlockIndex: Int!
+  expiredBlockIndex: Int!
+  sellerAgentAddress: Address!
+  price: String!
+  combatPoint: Int!
+  level: Int!
+  itemId: Int!
+  itemCount: Int!
 }
 
 type PeerChainStateQuery {
@@ -366,6 +413,8 @@ type ProtectedPrivateKeyType {
   address: Address!
 }
 
+scalar PublicKey
+
 type PublicKeyType {
   hex(compress: Boolean): ByteString!
   address: Address!
@@ -392,6 +441,16 @@ type RankingMapStateType {
   rankingInfos: [RankingInfoType!]!
 }
 
+type RpcInformationQuery {
+  totalCount: Int!
+  clients: [Address]!
+}
+
+type ShardedShopStateV2Type {
+  address: Address!
+  orderDigestList(id: Int, maximumPrice: Int): [OrderDigestType]!
+}
+
 type ShopItemType {
   sellerAgentAddress: Address!
   sellerAvatarAddress: Address!
@@ -413,13 +472,50 @@ type SkillType {
   chance: Int!
 }
 
+type StakeAchievementsType {
+  achievementsByLevel(level: Int!): Int!
+}
+
+type StakeRegularFixedRewardInfoType {
+  itemId: Int!
+  count: Int!
+}
+
+type StakeRegularRewardInfoType {
+  itemId: Int!
+  rate: Int!
+}
+
+type StakeRegularRewardsType {
+  level: Int!
+  requiredGold: Long!
+  rewards: [StakeRegularRewardInfoType!]!
+  bonusRewards: [StakeRegularFixedRewardInfoType!]!
+}
+
+type StakeRewardsType {
+  orderedList: [StakeRegularRewardsType!]!
+}
+
+type StakeStateType {
+  address: Address!
+  deposit: String!
+  startedBlockIndex: Int!
+  receivedBlockIndex: Int!
+  cancellableBlockIndex: Long!
+  claimableBlockIndex: Long!
+  achievements: StakeAchievementsType!
+}
+
 type StandaloneMutation {
   keyStore: KeyStoreMutation
   activationStatus: ActivationStatusMutation
   action: ActionMutation
   stageTx(payload: String!): Boolean!
+  stageTxV2(payload: String!): TxId!
   transfer(recipient: Address!, amount: String!, txNonce: Long!, currencyAddress: String! = "000000000000000000000000000000000000000A", memo: String): TxId
   transferGold(recipient: Address!, amount: String!): TxId
+  stageTransaction(payload: String!): TxId!
 }
 
 type StandaloneQuery {
@@ -436,7 +532,12 @@ type StandaloneQuery {
   nextTxNonce(address: Address!): Long!
   getTx(txId: TxId!): TransactionType_1
   minerAddress: Address
-  monsterCollectionStatus: MonsterCollectionStatusType
+  monsterCollectionStatus(address: Address): MonsterCollectionStatusType
+  transaction: TransactionHeadlessQuery!
+  activated(invitationCode: String!): Boolean!
+  activationKeyNonce(invitationCode: String!): String!
+  rpcInformation: RpcInformationQuery!
+  actionQuery: ActionQuery!
 }
 
 type StandaloneSubscription {
@@ -448,6 +549,9 @@ type StandaloneSubscription {
   nodeException: NodeExceptionType!
   monsterCollectionState: MonsterCollectionStateType!
   monsterCollectionStatus: MonsterCollectionStatusType!
+  monsterCollectionStatusByAgent(address: Address!): MonsterCollectionStatusType!
+  monsterCollectionStateByAgent(address: Address!): MonsterCollectionStateType!
+  balanceByAgent(address: Address!): String!
 }
 
 enum StatType {
@@ -464,10 +568,16 @@ type StateQuery {
   avatar(avatarAddress: Address!): AvatarStateType
   rankingMap(index: Int!): RankingMapStateType
   shop: ShopStateType
+  shardedShop(itemSubType: ItemSubType!, nonce: Int!): ShardedShopStateV2Type
   weeklyArena(index: Int!): WeeklyArenaStateType
   agent(address: Address!): AgentStateType
+  stakeState(address: Address!): StakeStateType
   monsterCollectionState(agentAddress: Address!): MonsterCollectionStateType
   monsterCollectionSheet: MonsterCollectionSheetType
+  stakeRewards: StakeRewardsType
+  crystalMonsterCollectionMultiplierSheet: CrystalMonsterCollectionMultiplierSheetType
+  unlockedRecipeIds(avatarAddress: Address!): [Int]
+  unlockedWorldIds(avatarAddress: Address!): [Int]
 }
 
 type StatsMapType {
@@ -494,6 +604,16 @@ type Transaction {
   timestamp: DateTimeOffset!
   actions: [Action!]!
   blockRef: [Block!]
+}
+
+type TransactionHeadlessQuery {
+  nextTxNonce(address: Address!): Long!
+  getTx(txId: TxId!): TransactionType_1
+  createUnsignedTx(publicKey: String!, plainValue: String!, nonce: Long): String!
+  attachSignature(unsignedTransaction: String!, signature: String!): String!
+  transactionResult(txId: TxId!): TxResultType!
+  unsignedTransaction(publicKey: String!, plainValue: String!, nonce: Long): ByteString!
+  signTransaction(unsignedTransaction: String!, signature: String!): ByteString!
 }
 
 type TransactionQuery {
@@ -523,6 +643,21 @@ type TransferNCGHistoryType {
 }
 
 scalar TxId
+
+type TxResultType {
+  txStatus: TxStatus!
+  blockIndex: Long
+  blockHash: String
+  exceptionName: String
+  exceptionMetadata: String
+}
+
+enum TxStatus {
+  INVALID
+  STAGING
+  SUCCESS
+  FAILURE
+}
 
 type ValidationQuery {
   metadata(raw: String!): Boolean!
