@@ -103,6 +103,8 @@ type AvatarStateType {
   worldInformation: WorldInformationType!
 }
 
+scalar BencodexValue
+
 scalar BigInt
 
 type Block {
@@ -612,7 +614,7 @@ type TransactionHeadlessQuery {
   getTx(txId: TxId!): TransactionType_1
   createUnsignedTx(publicKey: String!, plainValue: String!, nonce: Long): String!
   attachSignature(unsignedTransaction: String!, signature: String!): String!
-  transactionResult(txId: TxId!): TxResultType!
+  transactionResult(txId: TxId!): TransactionResultType!
   unsignedTransaction(publicKey: String!, plainValue: String!, nonce: Long): ByteString!
   signTransaction(unsignedTransaction: String!, signature: String!): ByteString!
 }
@@ -621,6 +623,24 @@ type TransactionQuery {
   transactions(signer: Address, involvedAddress: Address, desc: Boolean = false, offset: Int = 0, limit: Int): [Transaction!]!
   stagedTransactions(signer: Address, involvedAddress: Address, desc: Boolean = false, offset: Int = 0, limit: Int): [Transaction!]!
   transaction(id: ID): Transaction
+  unsignedTransaction(publicKey: String!, plainValue: String!, nonce: Long): ByteString!
+  bindSignature(unsignedTransaction: String!, signature: String!): String!
+  transactionResult(txId: ID!): TxResultType!
+}
+
+type TransactionResultType {
+  transactionStatus: TransactionStatus!
+  blockIndex: Long
+  blockHash: String
+  exceptionName: String
+  exceptionMetadata: String
+}
+
+enum TransactionStatus {
+  INVALID
+  STAGING
+  SUCCESS
+  FAILURE
 }
 
 type TransactionType_1 {
@@ -631,7 +651,7 @@ type TransactionType_1 {
   signer: Address!
   timestamp: String!
   updatedAddresses: [Address]!
-  actions: [Action]!
+  customActions: [Action]!
 }
 
 type TransferNCGHistoryType {
@@ -650,7 +670,7 @@ type TxResultType {
   blockIndex: Long
   blockHash: String
   exceptionName: String
-  exceptionMetadata: String
+  exceptionMetadata: BencodexValue
 }
 
 enum TxStatus {

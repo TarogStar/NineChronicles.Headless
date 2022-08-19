@@ -50,6 +50,11 @@
                 Address
             </a>
         </li>
+        <li  title="BencodexValue">
+            <a href="bencodexvalue.doc.html" class="slds-navigation-list--vertical__action slds-text-link--reset slds-truncate">
+                BencodexValue
+            </a>
+        </li>
         <li  title="BigInt">
             <a href="bigint.doc.html" class="slds-navigation-list--vertical__action slds-text-link--reset slds-truncate">
                 BigInt
@@ -143,6 +148,11 @@
         <li  title="StatType">
             <a href="stattype.doc.html" class="slds-navigation-list--vertical__action slds-text-link--reset slds-truncate">
                 StatType
+            </a>
+        </li>
+        <li  title="TransactionStatus">
+            <a href="transactionstatus.doc.html" class="slds-navigation-list--vertical__action slds-text-link--reset slds-truncate">
+                TransactionStatus
             </a>
         </li>
         <li  title="TxStatus">
@@ -500,6 +510,11 @@
                 TransactionQuery
             </a>
         </li>
+        <li  title="TransactionResultType">
+            <a href="transactionresulttype.doc.html" class="slds-navigation-list--vertical__action slds-text-link--reset slds-truncate">
+                TransactionResultType
+            </a>
+        </li>
         <li  title="TransactionType_1">
             <a href="transactiontype_1.doc.html" class="slds-navigation-list--vertical__action slds-text-link--reset slds-truncate">
                 TransactionType_1
@@ -613,7 +628,7 @@
             </a>
             GraphQL Schema definition
         </h2>
-        <code class="highlight"><ul class="code" style="padding-left:42px"><li><span class="keyword operator ts">type</span> <span class="identifier">TxResultType</span> {</li><li></li><li><span class="tab"><span class="meta">txStatus</span>: <a class="support type" href="txstatus.doc.html">TxStatus</a>! </span></li><li></li><li><span class="tab"><span class="meta">blockIndex</span>: <a class="support type" href="long.doc.html">Long</a> </span></li><li></li><li><span class="tab"><span class="meta">blockHash</span>: <a class="support type" href="string.doc.html">String</a> </span></li><li></li><li><span class="tab"><span class="meta">exceptionName</span>: <a class="support type" href="string.doc.html">String</a> </span></li><li></li><li><span class="tab"><span class="meta">exceptionMetadata</span>: <a class="support type" href="string.doc.html">String</a> </span></li><li>}</li></ul></code>
+        <code class="highlight"><ul class="code" style="padding-left:42px"><li><span class="keyword operator ts">type</span> <span class="identifier">TxResultType</span> {</li><li></li><li><span class="tab"><span class="meta">txStatus</span>: <a class="support type" href="txstatus.doc.html">TxStatus</a>! </span></li><li></li><li><span class="tab"><span class="meta">blockIndex</span>: <a class="support type" href="long.doc.html">Long</a> </span></li><li></li><li><span class="tab"><span class="meta">blockHash</span>: <a class="support type" href="string.doc.html">String</a> </span></li><li></li><li><span class="tab"><span class="meta">exceptionName</span>: <a class="support type" href="string.doc.html">String</a> </span></li><li></li><li><span class="tab"><span class="meta">exceptionMetadata</span>: <a class="support type" href="bencodexvalue.doc.html">BencodexValue</a> </span></li><li>}</li></ul></code>
     </div>
 </section>
 <section>
@@ -624,7 +639,7 @@
             </a>
             Require by
         </h2>
-        <ul class="require-by"><li><a href="transactionheadlessquery.doc.html" title="TransactionHeadlessQuery - ">TransactionHeadlessQuery<em></em></a><li></ul>
+        <ul class="require-by"><li><a href="transactionquery.doc.html" title="TransactionQuery - ">TransactionQuery<em></em></a><li></ul>
     </div>
 </section>
 <footer>
