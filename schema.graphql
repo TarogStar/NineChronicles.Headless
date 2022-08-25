@@ -614,7 +614,7 @@ type TransactionHeadlessQuery {
   getTx(txId: TxId!): TransactionType_1
   createUnsignedTx(publicKey: String!, plainValue: String!, nonce: Long): String!
   attachSignature(unsignedTransaction: String!, signature: String!): String!
-  transactionResult(txId: TxId!): TransactionResultType!
+  transactionResult(txId: TxId!): TxResultType!
   unsignedTransaction(publicKey: String!, plainValue: String!, nonce: Long): ByteString!
   signTransaction(unsignedTransaction: String!, signature: String!): ByteString!
 }
@@ -626,21 +626,6 @@ type TransactionQuery {
   unsignedTransaction(publicKey: String!, plainValue: String!, nonce: Long): ByteString!
   bindSignature(unsignedTransaction: String!, signature: String!): String!
   transactionResult(txId: ID!): TxResultType!
-}
-
-type TransactionResultType {
-  transactionStatus: TransactionStatus!
-  blockIndex: Long
-  blockHash: String
-  exceptionName: String
-  exceptionMetadata: String
-}
-
-enum TransactionStatus {
-  INVALID
-  STAGING
-  SUCCESS
-  FAILURE
 }
 
 type TransactionType_1 {
