@@ -42,7 +42,8 @@ namespace NineChronicles.Headless.GraphTypes
                         return new AvatarStateType.AvatarStateContext(
                             context.Source.AccountStateGetter.GetAvatarState(address),
                             context.Source.AccountStateGetter,
-                            context.Source.AccountBalanceGetter);
+                            context.Source.AccountBalanceGetter,
+                            context.Source.BlockIndex);
                     }
                     catch (InvalidAddressException)
                     {
