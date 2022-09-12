@@ -129,6 +129,18 @@ namespace NineChronicles.Headless.GraphTypes
                     {
                         Name = "consumableIds",
                         Description = "List of consumable id for use."
+                    },
+                    new QueryArgument<NonNullGraphType<IntGraphType>>
+                    {
+                        Name = "playCount",
+                        Description = "Number of times to play the level, defaults to 1.",
+                        DefaultValue = 1
+                    },
+                    new QueryArgument<IntGraphType>
+                    {
+                        Name = "buffId",
+                        Description = "id of the buff to use, must already be available.",
+                        DefaultValue = 1
                     }
                 ),
                 resolve: context =>
@@ -148,6 +160,8 @@ namespace NineChronicles.Headless.GraphTypes
                         List<Guid> costumeIds = context.GetArgument<List<Guid>>("costumeIds") ?? new List<Guid>();
                         List<Guid> equipmentIds = context.GetArgument<List<Guid>>("equipmentIds") ?? new List<Guid>();
                         List<Guid> consumableIds = context.GetArgument<List<Guid>>("consumableIds") ?? new List<Guid>();
+                        var playCount = context.GetArgument<int>("playCount");
+                        var buffId = context.GetArgument<int?>("buffId");
 
                         var action = new HackAndSlash
                         {
@@ -157,6 +171,8 @@ namespace NineChronicles.Headless.GraphTypes
                             Costumes = costumeIds,
                             Equipments = equipmentIds,
                             Foods = consumableIds,
+                            PlayCount = playCount,
+                            StageBuffId = buffId,
                         };
 
                         var actions = new NCAction[] { action };
