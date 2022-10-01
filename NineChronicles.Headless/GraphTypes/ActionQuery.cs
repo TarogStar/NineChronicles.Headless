@@ -202,7 +202,7 @@ namespace NineChronicles.Headless.GraphTypes
                     var playCount = context.GetArgument<int>("playCount");
                     var buffId = context.GetArgument<int?>("buffId");
 
-                    var action = new HackAndSlash
+                    NCAction action = new HackAndSlash
                     {
                         AvatarAddress = avatarAddress,
                         WorldId = worldId,
