@@ -29,6 +29,10 @@ using System.Text;
 using Nekoyume.Extensions;
 using Nekoyume.Model.BattleStatus.Arena;
 using Libplanet.Crypto;
+using System.Globalization;
+using Nekoyume.Model.Item;
+using Nekoyume.TableData.Crystal;
+using Nekoyume.Helper;
 
 namespace NineChronicles.Headless.GraphTypes
 {
@@ -435,6 +439,270 @@ namespace NineChronicles.Headless.GraphTypes
             Field<NonNullGraphType<ActionQuery>>(
                 name: "actionQuery",
                 resolve: context => new ActionQuery(standaloneContext));
+            Field<ListGraphType<Abstractions.CombinationEventType>>(
+                "itemEnhancementResult",
+                description: "All of the information returned for an item enhancement.",
+                arguments: new QueryArguments(new QueryArgument<NonNullGraphType<TxIdType>>
+                {
+                    Name = "transactionId",
+                    Description = "Transaction of the item enhancement."
+                }),
+                resolve: context =>
+                {
+                    var transactionId = context.GetArgument<TxId>("transactionId");
+                    if (!(standaloneContext.Store is { } store))
+                    {
+                        throw new InvalidOperationException("Store is not ready");
+                    }
+                    var transaction = store.GetTransaction<NCAction>(transactionId);
+                    var action = transaction.CustomActions?.FirstOrDefault();
+                    if (action == null)
+                    {
+                        throw new InvalidOperationException("Action is null.");
+                    }
+                    if (action.InnerAction.GetType() != typeof(ItemEnhancement))
+                    {
+                        throw new InvalidOperationException("Wrong Transaction Type, please choose a BattleArena action");
+                    }
+                    var innerAction = action.InnerAction as ItemEnhancement;
+                    if (innerAction == null)
+                    {
+                        throw new InvalidOperationException("Inner action is null");
+                    }
+                    var blockHash = store.GetFirstTxIdBlockHashIndex(transactionId);
+
+                    if (blockHash == null)
+                    {
+                        throw new InvalidOperationException("Block Hash is null");
+                    }
+                    var digest = store.GetBlockDigest(blockHash.Value);
+                    if (digest == null)
+                    {
+                        throw new InvalidOperationException("Block Digest is null.");
+                    }
+                    if (!(standaloneContext.BlockChain is { } chain))
+                    {
+                        return null;
+                    }
+                    var header = digest.Value.GetHeader();
+                    if (header == null)
+                    {
+                        throw new InvalidOperationException("Block Header is null.");
+                    }
+                    var preEvaluationHash = header.PreEvaluationHash;
+                    if (transaction.Signature == null)
+                    {
+                        throw new InvalidOperationException("Transaction Signature is null.");
+                    }
+                    byte[] hashedSignature;
+                    using (var hasher = System.Security.Cryptography.SHA1.Create())
+                    {
+                        hashedSignature = hasher.ComputeHash(transaction.Signature);
+                    }
+                    byte[] preEvaluationHashBytes = preEvaluationHash.ToBuilder().ToArray();
+                    int seed =
+                    (preEvaluationHashBytes.Length > 0
+                        ? BitConverter.ToInt32(preEvaluationHashBytes, 0) : 0)
+                    ^ BitConverter.ToInt32(hashedSignature, 0);
+                    var previousHash = header.PreviousHash;
+                    if (!(previousHash is BlockHash))
+                    {
+                        throw new InvalidOperationException("Previous BlockHash missing.");
+                    }
+                    var blockIndex = chain[previousHash.Value].Index;
+                    var states = new StateContext(
+                        chain.ToAccountStateGetter(previousHash),
+                        chain.ToAccountBalanceGetter(previousHash),
+                        blockIndex
+                    );
+                    var avatarAddress = innerAction.avatarAddress;
+                    var slotAddress = avatarAddress.Derive(
+                        string.Format(
+                            CultureInfo.InvariantCulture,
+                            CombinationSlotState.DeriveFormat,
+                            innerAction.slotIndex
+                        )
+                    );
+
+                    var inventoryAddress = avatarAddress.Derive(Lib9c.SerializeKeys.LegacyInventoryKey);
+                    var worldInformationAddress = avatarAddress.Derive(Lib9c.SerializeKeys.LegacyWorldInformationKey);
+                    var questListAddress = avatarAddress.Derive(Lib9c.SerializeKeys.LegacyQuestListKey);
+                    if (!states.TryGetAgentAvatarStatesV2(transaction.Signer, avatarAddress, out var agentState, out var avatarState, out _))
+                    {
+                        throw new FailedLoadStateException($"Aborted as the avatar state of the signer was failed to load.");
+                    }
+
+                    if (!avatarState.inventory.TryGetNonFungibleItem(innerAction.itemId, out ItemUsable enhancementItem))
+                    {
+                        throw new ItemDoesNotExistException(
+                            $"Aborted as the NonFungibleItem was failed to load from avatar's inventory."
+                        );
+                    }
+
+                    if (enhancementItem.RequiredBlockIndex > blockIndex)
+                    {
+                        throw new RequiredBlockIndexException(
+                            $"Aborted as the equipment to enhance is not available yet;" +
+                            $" it will be available at the block #{enhancementItem.RequiredBlockIndex}."
+                        );
+                    }
+
+                    if (!(enhancementItem is Equipment enhancementEquipment))
+                    {
+                        throw new InvalidCastException(
+                            $"Aborted as the item is not a {nameof(Equipment)}, but {enhancementItem.GetType().Name}."
+
+                        );
+                    }
+                    var slotState = states.GetCombinationSlotState(avatarAddress, innerAction.slotIndex);
+                    if (slotState is null)
+                    {
+                        throw new FailedLoadStateException($"Aborted as the slot state was failed to load.");
+                    }
+
+                    if (!slotState.Validate(avatarState, blockIndex))
+                    {
+                        throw new CombinationSlotUnlockException($"Aborted as the slot state was failed to invalid.");
+                    }
+
+                    Dictionary<Type, (Address, ISheet)> sheets = states.GetSheets(sheetTypes: new[]
+                    {
+                        typeof(EnhancementCostSheetV2),
+                        typeof(MaterialItemSheet),
+                        typeof(CrystalEquipmentGrindingSheet),
+                        typeof(CrystalMonsterCollectionMultiplierSheet),
+                        typeof(StakeRegularRewardSheet)
+                    });
+
+                    var enhancementCostSheet = sheets.GetSheet<EnhancementCostSheetV2>();
+                    if (!ItemEnhancement.TryGetRow(enhancementEquipment, enhancementCostSheet, out var row))
+                    {
+                        throw new SheetRowNotFoundException("Replay", nameof(WorldSheet), enhancementEquipment.level);
+                    }
+
+                    var maxLevel = ItemEnhancement.GetEquipmentMaxLevel(enhancementEquipment, enhancementCostSheet);
+                    if (enhancementEquipment.level >= maxLevel)
+                    {
+                        throw new EquipmentLevelExceededException(
+                            $"Aborted due to invalid equipment level: {enhancementEquipment.level} < {maxLevel}");
+                    }
+
+                    if (!avatarState.inventory.TryGetNonFungibleItem(innerAction.materialId, out ItemUsable materialItem))
+                    {
+                        throw new NotEnoughMaterialException(
+                            $"Aborted as the signer does not have a necessary material ({innerAction.materialId})."
+                        );
+                    }
+
+                    if (materialItem.RequiredBlockIndex > blockIndex)
+                    {
+                        throw new RequiredBlockIndexException(
+                            $"Aborted as the material ({innerAction.materialId}) is not available yet;" +
+                            $" it will be available at the block #{materialItem.RequiredBlockIndex}."
+                        );
+                    }
+
+                    if (!(materialItem is Equipment materialEquipment))
+                    {
+                        throw new InvalidCastException(
+                            $"Aborted as the material item is not an {nameof(Equipment)}, but {materialItem.GetType().Name}."
+                        );
+                    }
+
+                    if (enhancementEquipment.ItemId == innerAction.materialId)
+                    {
+                        throw new InvalidMaterialException(
+                            $"Aborted as an equipment to enhance ({innerAction.materialId}) was used as a material too."
+                        );
+                    }
+
+                    if (materialEquipment.ItemSubType != enhancementEquipment.ItemSubType)
+                    {
+                        throw new InvalidMaterialException(
+                            $"Aborted as the material item is not a {enhancementEquipment.ItemSubType}," +
+                            $" but {materialEquipment.ItemSubType}."
+                        );
+                    }
+
+                    if (materialEquipment.Grade != enhancementEquipment.Grade)
+                    {
+                        throw new InvalidMaterialException(
+                            $"Aborted as grades of the equipment to enhance ({enhancementEquipment.Grade})" +
+                            $" and a material ({materialEquipment.Grade}) does not match."
+                        );
+                    }
+
+                    if (materialEquipment.level != enhancementEquipment.level)
+                    {
+                        throw new InvalidMaterialException(
+                            $"Aborted as levels of the equipment to enhance ({enhancementEquipment.level})" +
+                            $" and a material ({materialEquipment.level}) does not match."
+                        );
+                    }
+                    var requiredActionPoint = ItemEnhancement.GetRequiredAp();
+                    if (avatarState.actionPoint < requiredActionPoint)
+                    {
+                        throw new NotEnoughActionPointException(
+                            $"Aborted due to insufficient action point: {avatarState.actionPoint} < {requiredActionPoint}"
+                        );
+                    }
+                    var random = new LocalRandom(seed);
+                    // clone items
+                    var requiredNcg = row.Cost;
+                    var preItemUsable = new Equipment((Dictionary)enhancementEquipment.Serialize());
+                    var equipmentResult = ItemEnhancement.GetEnhancementResult(row, random);
+                    FungibleAssetValue crystal = 0 * CrystalCalculator.CRYSTAL;
+                    if (equipmentResult != ItemEnhancement.EnhancementResult.Fail)
+                    {
+                        enhancementEquipment.LevelUpV2(random, row, equipmentResult == ItemEnhancement.EnhancementResult.GreatSuccess);
+                    }
+                    else
+                    {
+                        Address monsterCollectionAddress = MonsterCollectionState.DeriveAddress(
+                            transaction.Signer,
+                            agentState.MonsterCollectionRound
+                        );
+
+                        Currency currency = states.GetGoldCurrency();
+                        FungibleAssetValue stakedAmount = 0 * currency;
+                        if (states.TryGetStakeState(transaction.Signer, out StakeState stakeState))
+                        {
+                            stakedAmount = states.GetBalance(stakeState.address, currency);
+                        }
+                        else
+                        {
+                            if (states.TryGetState(monsterCollectionAddress, out Dictionary _))
+                            {
+                                stakedAmount = states.GetBalance(monsterCollectionAddress, currency);
+                            }
+                        }
+
+                        crystal = CrystalCalculator.CalculateCrystal(
+                            transaction.Signer,
+                            new[] { preItemUsable },
+                            stakedAmount,
+                            true,
+                            sheets.GetSheet<CrystalEquipmentGrindingSheet>(),
+                            sheets.GetSheet<CrystalMonsterCollectionMultiplierSheet>(),
+                            sheets.GetSheet<StakeRegularRewardSheet>()
+                        );
+                    }
+
+                    var requiredBlockCount = ItemEnhancement.GetRequiredBlockCount(row, equipmentResult);
+                    var requiredBlockIndex = blockIndex + requiredBlockCount;
+                    enhancementEquipment.Update(requiredBlockIndex);
+                    var result = new ItemEnhancement.ResultModel
+                    {
+                        preItemUsable = preItemUsable,
+                        itemUsable = enhancementEquipment,
+                        materialItemIdList = new[] { innerAction.materialId },
+                        actionPoint = requiredActionPoint,
+                        enhancementResult = equipmentResult,
+                        gold = requiredNcg,
+                        CRYSTAL = crystal,
+                    };
+                    return result;
+                });
 
             Field<ListGraphType<Abstractions.ArenaEventBaseType>>(
                 "arenaBattleData",
