@@ -439,7 +439,7 @@ namespace NineChronicles.Headless.GraphTypes
             Field<NonNullGraphType<ActionQuery>>(
                 name: "actionQuery",
                 resolve: context => new ActionQuery(standaloneContext));
-            Field<ListGraphType<Abstractions.CombinationEventType>>(
+            Field<Abstractions.CombinationEventType>(
                 "itemEnhancementResult",
                 description: "All of the information returned for an item enhancement.",
                 arguments: new QueryArguments(new QueryArgument<NonNullGraphType<TxIdType>>
