@@ -11,6 +11,10 @@ namespace NineChronicles.Headless.GraphTypes.Abstractions
 {
     internal class CombinationEventType: ObjectGraphType<ResultModel>
     {
+        public class EnhancementResultType: EnumerationGraphType<EnhancementResult>
+        {
+
+        }
         public CombinationEventType()
         {
             Field<ListGraphType<GuidGraphType>>(
@@ -25,7 +29,7 @@ namespace NineChronicles.Headless.GraphTypes.Abstractions
                 nameof(ResultModel.actionPoint),
                 resolve: context => context.Source.actionPoint
                 );
-            Field<EnumerationGraphType<EnhancementResult>>(
+            Field<EnhancementResultType>(
                 nameof(ResultModel.enhancementResult),
                 resolve: context => context.Source.enhancementResult
                 );
