@@ -20,6 +20,96 @@ namespace NineChronicles.Headless.GraphTypes
     {
         public ActionMutation(NineChroniclesNodeService service)
         {
+            Field<NonNullGraphType<TxIdType>>("battle",
+                description: "Start stage to get material.",
+                arguments: new QueryArguments(
+                    new QueryArgument<NonNullGraphType<AddressType>>
+                    {
+                        Name = "avatarAddress",
+                        Description = "Avatar address."
+                    },
+                    new QueryArgument<NonNullGraphType<AddressType>>
+                    {
+                        Name = "ev",
+                        Description = "World ID containing the stage ID."
+                    },
+                    new QueryArgument<NonNullGraphType<IntGraphType>>
+                    {
+                        Name = "stageId",
+                        Description = "Stage ID."
+                    },
+                    new QueryArgument<ListGraphType<GuidGraphType>>
+                    {
+                        Name = "costumeIds",
+                        Description = "List of costume id for equip."
+                    },
+                    new QueryArgument<ListGraphType<GuidGraphType>>
+                    {
+                        Name = "equipmentIds",
+                        Description = "List of equipment id for equip."
+                    },
+                    new QueryArgument<ListGraphType<GuidGraphType>>
+                    {
+                        Name = "consumableIds",
+                        Description = "List of consumable id for use."
+                    },
+                    new QueryArgument<NonNullGraphType<IntGraphType>>
+                    {
+                        Name = "playCount",
+                        Description = "Number of times to play the level, defaults to 1.",
+                        DefaultValue = 1
+                    },
+                    new QueryArgument<IntGraphType>
+                    {
+                        Name = "buffId",
+                        Description = "id of the buff to use, must already be available.",
+                        DefaultValue = 1
+                    }
+                ),
+                resolve: context =>
+                {
+                    try
+                    {
+                        BlockChain<NCAction>? blockChain = service.Swarm.BlockChain;
+                        if (blockChain is null)
+                        {
+                            throw new InvalidOperationException($"{nameof(blockChain)} is null.");
+                        }
+
+                        Address avatarAddress = context.GetArgument<Address>("avatarAddress");
+                        int worldId = context.GetArgument<int>("worldId");
+                        int stageId = context.GetArgument<int>("stageId");
+                        Address rankingMapAddress = context.GetArgument<Address>("rankingMapAddress");
+                        List<Guid> costumeIds = context.GetArgument<List<Guid>>("costumeIds") ?? new List<Guid>();
+                        List<Guid> equipmentIds = context.GetArgument<List<Guid>>("equipmentIds") ?? new List<Guid>();
+                        List<Guid> consumableIds = context.GetArgument<List<Guid>>("consumableIds") ?? new List<Guid>();
+                        var playCount = context.GetArgument<int>("playCount");
+                        var buffId = context.GetArgument<int?>("buffId");
+
+                        var action = new HackAndSlash
+                        {
+                            AvatarAddress = avatarAddress,
+                            WorldId = worldId,
+                            StageId = stageId,
+                            Costumes = costumeIds,
+                            Equipments = equipmentIds,
+                            Foods = consumableIds,
+                            PlayCount = playCount,
+                            StageBuffId = buffId,
+                        };
+
+                        var actions = new NCAction[] { action };
+                        Transaction<NCAction> tx = blockChain.MakeTransaction(service.MinerPrivateKey, actions);
+                        return tx.Id;
+                    }
+                    catch (Exception e)
+                    {
+                        var msg = $"Unexpected exception occurred during {typeof(ActionMutation)}: {e}";
+                        context.Errors.Add(new ExecutionError(msg, e));
+                        Log.Error(msg, e);
+                        throw;
+                    }
+                });
             Field<NonNullGraphType<TxIdType>>("createAvatar",
                 description: "Create new avatar.",
                 arguments: new QueryArguments(
@@ -187,6 +277,7 @@ namespace NineChronicles.Headless.GraphTypes
                         throw;
                     }
                 });
+
 
             Field<NonNullGraphType<TxIdType>>("combinationEquipment",
                 description: "Combine new equipment.",
