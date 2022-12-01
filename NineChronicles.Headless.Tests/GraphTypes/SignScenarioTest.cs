@@ -115,7 +115,26 @@ namespace NineChronicles.Headless.Tests.GraphTypes
             (Transaction<NCAction> signedTx, string hex) = await GetSignedTransaction(privateKey, plainValue);
             var action = Assert.IsType<PrepareRewardAssets>(signedTx.CustomActions!.Single().InnerAction);
             Assert.Equal(rewardPoolAddress, action.RewardPoolAddress);
-            Assert.Equal(new Currency("CRYSTAL", 0, minters: null) * 100, action.Assets.Single());
+#pragma warning disable CS0618
+            // Use of obsolete method Currency.Legacy(): https://github.com/planetarium/lib9c/discussions/1319
+            Assert.Equal(Currency.Legacy("CRYSTAL", 0, null) * 100, action.Assets.Single());
+#pragma warning restore CS0618
+            await StageTransaction(signedTx, hex);
+        }
+
+        [Fact]
+        public async Task SignTransaction_TransferAssets()
+        {
+            var privateKey = new PrivateKey();
+            var sender = privateKey.ToAddress();
+            // Create Action.
+            var args = $"sender: \"{sender}\", recipients: [{{ recipient: \"{sender}\", amount: {{ quantity: 100, decimalPlaces: 18, ticker: \"CRYSTAL\" }} }}, {{ recipient: \"{sender}\", amount: {{ quantity: 100, decimalPlaces: 0, ticker: \"RUNE_FENRIR1\" }} }}]";
+            object plainValue = await GetAction("transferAssets", args);
+
+            (Transaction<NCAction> signedTx, string hex) = await GetSignedTransaction(privateKey, plainValue);
+            var action = Assert.IsType<TransferAssets>(signedTx.CustomActions!.Single().InnerAction);
+            Assert.Equal(sender, action.Sender);
+            Assert.Equal(2, action.Recipients.Count);
             await StageTransaction(signedTx, hex);
         }
 
