@@ -95,6 +95,8 @@ namespace NineChronicles.Headless.GraphTypes.States
 
         public IImmutableDictionary<Address, IImmutableSet<Currency>> UpdatedFungibleAssets => throw new System.NotImplementedException();
 
+        public IImmutableSet<Currency> TotalSupplyUpdatedCurrencies => throw new System.NotImplementedException();
+
         public IValue? GetState(Address address) =>
             AccountStateGetter(new[] { address })[0];
 
@@ -124,6 +126,9 @@ namespace NineChronicles.Headless.GraphTypes.States
             throw new System.NotImplementedException();
         }
 
-        
+        public FungibleAssetValue GetTotalSupply(Currency currency)
+        {
+            throw new System.NotImplementedException();
+        }
     }
 }
