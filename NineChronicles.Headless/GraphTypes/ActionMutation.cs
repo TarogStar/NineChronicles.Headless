@@ -220,6 +220,12 @@ namespace NineChronicles.Headless.GraphTypes
                         Name = "consumableIds",
                         Description = "List of consumable id for use."
                     },
+                    new QueryArgument<ListGraphType<NonNullGraphType<RuneSlotInfoInputType>>>
+                    {
+                        Name = "runeSlotInfos",
+                        DefaultValue = new List<RuneSlotInfo>(),
+                        Description = "List of rune slot info for equip."
+                    },
                     new QueryArgument<NonNullGraphType<IntGraphType>>
                     {
                         Name = "playCount",
@@ -252,6 +258,7 @@ namespace NineChronicles.Headless.GraphTypes
                         List<Guid> consumableIds = context.GetArgument<List<Guid>>("consumableIds") ?? new List<Guid>();
                         var playCount = context.GetArgument<int>("playCount");
                         var buffId = context.GetArgument<int?>("buffId");
+                        List<RuneSlotInfo> runeSlotInfos = context.GetArgument<List<RuneSlotInfo>>("runeSlotInfos");
 
                         var action = new HackAndSlash
                         {
@@ -263,6 +270,7 @@ namespace NineChronicles.Headless.GraphTypes
                             Foods = consumableIds,
                             PlayCount = playCount,
                             StageBuffId = buffId,
+                            RuneInfos = runeSlotInfos,
                         };
 
                         var actions = new NCAction[] { action };

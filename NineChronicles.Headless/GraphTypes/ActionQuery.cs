@@ -10,6 +10,7 @@ using Libplanet;
 using Libplanet.Assets;
 using Libplanet.Explorer.GraphTypes;
 using Nekoyume.Action;
+using Nekoyume.Action.Factory;
 using Nekoyume.Helper;
 using Nekoyume.Model.State;
 using Nekoyume.TableData;
@@ -33,8 +34,8 @@ namespace NineChronicles.Headless.GraphTypes
                     Name = "amount",
                     Description = "An amount to stake.",
                 }),
-                resolve: context =>
-                    Encode(context,
+                resolve: context => Encode(
+                    context,
                     (NCAction)new Stake(context.GetArgument<BigInteger>("amount"))));
 
             Field<ByteStringType>(
@@ -46,9 +47,19 @@ namespace NineChronicles.Headless.GraphTypes
                         Description = "The avatar address to receive staking rewards."
                     }),
                 resolve: context =>
-                    Encode(context,
-                        (NCAction)new ClaimStakeReward(
-                            context.GetArgument<Address>("avatarAddress"))));
+                {
+                    if (!(standaloneContext.BlockChain is { } chain))
+                    {
+                        throw new InvalidOperationException("BlockChain not found in the context");
+                    }
+
+                    return Encode(
+                        context,
+                        (GameAction)ClaimStakeRewardFactory.CreateByBlockIndex(
+                            chain.Tip.Index,
+                            context.GetArgument<Address>("avatarAddress")));
+                }
+            );
             Field<NonNullGraphType<ByteStringType>>(
                 name: "migrateMonsterCollection",
                 arguments: new QueryArguments(
@@ -57,10 +68,10 @@ namespace NineChronicles.Headless.GraphTypes
                         Name = "avatarAddress",
                         Description = "The avatar address to receive monster collection rewards."
                     }),
-                resolve: context =>
-                    Encode(context,
-                        (NCAction)new MigrateMonsterCollection(
-                            context.GetArgument<Address>("avatarAddress"))));
+                resolve: context => Encode(
+                    context,
+                    (NCAction)new MigrateMonsterCollection(
+                        context.GetArgument<Address>("avatarAddress"))));
             Field<ByteStringType>(
                 name: "grinding",
                 arguments: new QueryArguments(
@@ -334,6 +345,12 @@ namespace NineChronicles.Headless.GraphTypes
                         Description = "refill ticket by NCG.",
                         DefaultValue = false,
                         Name = "payNcg",
+                    },
+                    new QueryArgument<ListGraphType<NonNullGraphType<RuneSlotInfoInputType>>>
+                    {
+                        Description = "list of rune slot",
+                        DefaultValue = new List<RuneSlotInfo>(),
+                        Name = "runeSlotInfos"
                     }
                 ),
                 resolve: context =>
@@ -343,6 +360,7 @@ namespace NineChronicles.Headless.GraphTypes
                     var costumeIds = context.GetArgument<List<Guid>>("costumeIds");
                     var foodIds = context.GetArgument<List<Guid>>("foodIds");
                     var payNcg = context.GetArgument<bool>("payNcg");
+                    var runeSlotInfos = context.GetArgument<List<RuneSlotInfo>>("runeSlotInfos");
 
                     NCAction action = new Raid
                     {
@@ -350,7 +368,8 @@ namespace NineChronicles.Headless.GraphTypes
                         EquipmentIds = equipmentIds,
                         CostumeIds = costumeIds,
                         FoodIds = foodIds,
-                        PayNcg = payNcg
+                        PayNcg = payNcg,
+                        RuneInfos = runeSlotInfos,
                     };
                     return Encode(context, action);
                 }
@@ -419,6 +438,147 @@ namespace NineChronicles.Headless.GraphTypes
                     return Encode(context, action);
                 }
             );
+            Field<NonNullGraphType<ByteStringType>>(
+                "transferAssets",
+                arguments: new QueryArguments(
+                    new QueryArgument<NonNullGraphType<AddressType>>
+                    {
+                        Description = "Address of sender.",
+                        Name = "sender",
+                    },
+                    new QueryArgument<NonNullGraphType<ListGraphType<NonNullGraphType<RecipientsInputType>>>>
+                    {
+                        Description = "List of tuples that recipients' address and asset amount to be sent",
+                        Name = "recipients",
+                    },
+                    new QueryArgument<StringGraphType>
+                    {
+                        Description = "A 80-max length string to note.",
+                        Name = "memo",
+                    }
+                ),
+                resolve: context =>
+                {
+                    var sender = context.GetArgument<Address>("sender");
+                    var recipients =
+                        context.GetArgument<List<(Address recipient, FungibleAssetValue amount)>>("recipients");
+                    var memo = context.GetArgument<string?>("memo");
+                    if (recipients.Count > TransferAssets.RecipientsCapacity)
+                    {
+                        throw new ExecutionError(
+                            $"recipients must be less than or equal {TransferAssets.RecipientsCapacity}.");
+                    }
+
+                    NCAction action = new TransferAssets(sender, recipients, memo);
+                    return Encode(context, action);
+                }
+            );
+            Field<NonNullGraphType<ByteStringType>>(
+                "createAvatar",
+                arguments: new QueryArguments(
+                    new QueryArgument<NonNullGraphType<IntGraphType>>
+                    {
+                        Name = "index",
+                        Description = "index of avatar in `AgentState.avatarAddresses`.(0~2)",
+                    },
+                    new QueryArgument<NonNullGraphType<StringGraphType>>
+                    {
+                        Name = "name",
+                        Description = "name of avatar.(2~20 characters)",
+                    },
+                    new QueryArgument<IntGraphType>
+                    {
+                        Name = "hair",
+                        Description = "hair index of avatar.",
+                        DefaultValue = 0,
+                    },
+                    new QueryArgument<IntGraphType>
+                    {
+                        Name = "lens",
+                        Description = "lens index of avatar.",
+                        DefaultValue = 0,
+                    },
+                    new QueryArgument<IntGraphType>
+                    {
+                        Name = "ear",
+                        Description = "ear index of avatar.",
+                        DefaultValue = 0,
+                    },
+                    new QueryArgument<IntGraphType>
+                    {
+                        Name = "tail",
+                        Description = "tail index of avatar.",
+                        DefaultValue = 0,
+                    }),
+                resolve: context =>
+                {
+                    var index = context.GetArgument<int>("index");
+                    if (index < 0 || index > 2)
+                    {
+                        throw new ExecutionError(
+                            $"Invalid index({index}). It must be 0~2.");
+                    }
+
+                    var name = context.GetArgument<string>("name");
+                    if (name.Length < 2 || name.Length > 20)
+                    {
+                        throw new ExecutionError(
+                            $"Invalid name({name}). It must be 2~20 characters.");
+                    }
+
+                    var hair = context.GetArgument<int>("hair");
+                    var lens = context.GetArgument<int>("lens");
+                    var ear = context.GetArgument<int>("ear");
+                    var tail = context.GetArgument<int>("tail");
+
+                    NCAction action = new CreateAvatar
+                    {
+                        index = index,
+                        name = name,
+                        hair = hair,
+                        lens = lens,
+                        ear = ear,
+                        tail = tail,
+                    };
+                    return Encode(context, action);
+                });
+            Field<NonNullGraphType<ByteStringType>>(
+                "runeEnhancement",
+                arguments: new QueryArguments(
+                    new QueryArgument<NonNullGraphType<AddressType>>
+                    {
+                        Name = "avatarAddress",
+                        Description = "The avatar address to enhance rune."
+                    },
+                    new QueryArgument<NonNullGraphType<IntGraphType>>
+                    {
+                        Name = "runeId",
+                        Description = "Rune ID to enhance."
+                    },
+                    new QueryArgument<IntGraphType>
+                    {
+                        Name = "tryCount",
+                        Description = "The try count to enhance rune"
+
+                    }),
+                resolve: context =>
+                {
+                    var avatarAddress = context.GetArgument<Address>("avatarAddress");
+                    var runeId = context.GetArgument<int>("runeId");
+                    var tryCount = context.GetArgument<int?>("tryCount") ?? 1;
+                    if (tryCount <= 0)
+                    {
+                        throw new ExecutionError($"tryCount must be positive: {tryCount} is invalid.");
+                    }
+
+                    NCAction action = new RuneEnhancement
+                    {
+                        AvatarAddress = avatarAddress,
+                        RuneId = runeId,
+                        TryCount = tryCount
+                    };
+                    return Encode(context, action);
+                });
         }
 
         internal virtual byte[] Encode(IResolveFieldContext context, NCAction action)

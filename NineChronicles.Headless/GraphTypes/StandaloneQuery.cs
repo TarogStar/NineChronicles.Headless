@@ -174,6 +174,7 @@ namespace NineChronicles.Headless.GraphTypes
 
             Field<NonNullGraphType<Libplanet.Explorer.Queries.ExplorerQuery<NCAction>>>(
                 name: "chainQuery",
+                deprecationReason: "Use /graphql/explorer",
                 resolve: context => new { }
             );
 
@@ -317,7 +318,9 @@ namespace NineChronicles.Headless.GraphTypes
 
 
                     BlockHash? offset = blockChain.GetDelayedRenderer()?.Tip?.Hash;
+#pragma warning disable S3247
                     if (blockChain.GetState(agentAddress, offset) is Dictionary agentDict)
+#pragma warning restore S3247
                     {
                         AgentState agentState = new AgentState(agentDict);
                         Address deriveAddress = MonsterCollectionState.DeriveAddress(agentAddress, agentState.MonsterCollectionRound);
@@ -847,6 +850,11 @@ namespace NineChronicles.Headless.GraphTypes
                     {
                         Name = "nonce",
                         Description = "The nonce for Transaction.",
+                    },
+                    new QueryArgument<DateTimeOffsetGraphType>
+                    {
+                        Name = "timestamp",
+                        Description = "The time this transaction is created.",
                     }
                 ),
                 resolve: context => new ActionTxQuery(standaloneContext));
@@ -854,7 +862,7 @@ namespace NineChronicles.Headless.GraphTypes
             Field<NonNullGraphType<AddressQuery>>(
                 name: "addressQuery",
                 description: "Query to get derived address.",
-                resolve: context => new AddressQuery());
+                resolve: context => new AddressQuery(standaloneContext));
         }
     }
 }

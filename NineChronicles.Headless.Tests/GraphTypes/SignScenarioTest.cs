@@ -59,7 +59,7 @@ namespace NineChronicles.Headless.Tests.GraphTypes
             string ids = $"[\"{guid}\"]";
 
             // Create Action.
-            var args = $"avatarAddress: \"{avatarAddress}\", equipmentIds: {ids}, costumeIds: {ids}, foodIds: {ids}, payNcg: true";
+            var args = $"avatarAddress: \"{avatarAddress}\", equipmentIds: {ids}, costumeIds: {ids}, foodIds: {ids}, payNcg: true, runeSlotInfos: [{{ slotIndex: 1, runeId: 2 }}]";
             object plainValue = await GetAction("raid", args);
 
             (Transaction<NCAction> signedTx, string hex) = await GetSignedTransaction(privateKey, plainValue);
@@ -70,6 +70,7 @@ namespace NineChronicles.Headless.Tests.GraphTypes
             Guid foodId = Assert.Single(action.FoodIds);
             Assert.All(new[] { equipmentId, costumeId, foodId }, id => Assert.Equal(guid, id));
             Assert.True(action.PayNcg);
+            Assert.Single(action.RuneInfos);
             await StageTransaction(signedTx, hex);
         }
 
@@ -119,6 +120,22 @@ namespace NineChronicles.Headless.Tests.GraphTypes
             // Use of obsolete method Currency.Legacy(): https://github.com/planetarium/lib9c/discussions/1319
             Assert.Equal(Currency.Legacy("CRYSTAL", 0, null) * 100, action.Assets.Single());
 #pragma warning restore CS0618
+            await StageTransaction(signedTx, hex);
+        }
+
+        [Fact]
+        public async Task SignTransaction_TransferAssets()
+        {
+            var privateKey = new PrivateKey();
+            var sender = privateKey.ToAddress();
+            // Create Action.
+            var args = $"sender: \"{sender}\", recipients: [{{ recipient: \"{sender}\", amount: {{ quantity: 100, decimalPlaces: 18, ticker: \"CRYSTAL\" }} }}, {{ recipient: \"{sender}\", amount: {{ quantity: 100, decimalPlaces: 0, ticker: \"RUNE_FENRIR1\" }} }}]";
+            object plainValue = await GetAction("transferAssets", args);
+
+            (Transaction<NCAction> signedTx, string hex) = await GetSignedTransaction(privateKey, plainValue);
+            var action = Assert.IsType<TransferAssets>(signedTx.CustomActions!.Single().InnerAction);
+            Assert.Equal(sender, action.Sender);
+            Assert.Equal(2, action.Recipients.Count);
             await StageTransaction(signedTx, hex);
         }
 
