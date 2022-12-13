@@ -33,6 +33,7 @@ using System.Globalization;
 using Nekoyume.Model.Item;
 using Nekoyume.TableData.Crystal;
 using Nekoyume.Helper;
+using Nekoyume.Model.EnumType;
 
 namespace NineChronicles.Headless.GraphTypes
 {
@@ -827,10 +828,57 @@ namespace NineChronicles.Headless.GraphTypes
                     myArenaAvatarState.UpdateEquipment(innerAction.equipments);
                     myArenaAvatarState.UpdateCostumes(innerAction.costumes);
 
+                    var ItemSlotStateAddress = ItemSlotState.DeriveAddress(myAvatarAddress, BattleType.Arena);
+                    var myItemSlotState = states.TryGetState(ItemSlotStateAddress, out List rawItemSlotState)
+                        ? new ItemSlotState(rawItemSlotState)
+                        : new ItemSlotState(BattleType.Arena);
+                    var AvatarState = states.GetAvatarState(myAvatarAddress);
+                    var RuneSlotStateAddress = RuneSlotState.DeriveAddress(myAvatarAddress, BattleType.Arena);
+                    var myRuneSlotState = states.TryGetState(RuneSlotStateAddress, out List RawRuneSlotState)
+                        ? new RuneSlotState(RawRuneSlotState)
+                        : new RuneSlotState(BattleType.Arena);
+
+                    var runeStates = new List<RuneState>();
+                    var RuneSlotInfos = myRuneSlotState.GetEquippedRuneSlotInfos();
+                    foreach (var address in RuneSlotInfos.Select(info => RuneState.DeriveAddress(myAvatarAddress, info.RuneId)))
+                    {
+                        if (states.TryGetState(address, out List rawRuneState))
+                        {
+                            runeStates.Add(new RuneState(rawRuneState));
+                        }
+                    }
+
                     // simulate
+                    // get enemy equipped items
+                    var enemyItemSlotStateAddress = ItemSlotState.DeriveAddress(enemyAvatarAddress, BattleType.Arena);
+                    var enemyItemSlotState = states.TryGetState(enemyItemSlotStateAddress, out List rawEnemyItemSlotState)
+                        ? new ItemSlotState(rawEnemyItemSlotState)
+                        : new ItemSlotState(BattleType.Arena);
                     var enemyAvatarState = states.GetEnemyAvatarState(enemyAvatarAddress);
-                    ArenaPlayerDigest ExtraMyArenaPlayerDigest = new ArenaPlayerDigest(avatarState, myArenaAvatarState);
-                    ArenaPlayerDigest ExtraEnemyArenaPlayerDigest = new ArenaPlayerDigest(enemyAvatarState, enemyArenaAvatarState);
+                    var enemyRuneSlotStateAddress = RuneSlotState.DeriveAddress(enemyAvatarAddress, BattleType.Arena);
+                    var enemyRuneSlotState = states.TryGetState(enemyRuneSlotStateAddress, out List enemyRawRuneSlotState)
+                        ? new RuneSlotState(enemyRawRuneSlotState)
+                        : new RuneSlotState(BattleType.Arena);
+
+                    var enemyRuneStates = new List<RuneState>();
+                    var enemyRuneSlotInfos = enemyRuneSlotState.GetEquippedRuneSlotInfos();
+                    foreach (var address in enemyRuneSlotInfos.Select(info => RuneState.DeriveAddress(myAvatarAddress, info.RuneId)))
+                    {
+                        if (states.TryGetState(address, out List rawRuneState))
+                        {
+                            enemyRuneStates.Add(new RuneState(rawRuneState));
+                        }
+                    }
+
+                    ArenaPlayerDigest ExtraMyArenaPlayerDigest = new ArenaPlayerDigest(avatarState, 
+                        myItemSlotState.Equipments, 
+                        myItemSlotState.Costumes,
+                        runeStates);
+                    ArenaPlayerDigest ExtraEnemyArenaPlayerDigest = new ArenaPlayerDigest(
+                        enemyAvatarState,
+                        enemyItemSlotState.Equipments,
+                        enemyItemSlotState.Costumes,
+                        enemyRuneStates);
                     var arenaSheets = sheets.GetArenaSimulatorSheets();
                     var log = simulator.Simulate(ExtraMyArenaPlayerDigest, ExtraEnemyArenaPlayerDigest, arenaSheets);
                     return log.Events;
