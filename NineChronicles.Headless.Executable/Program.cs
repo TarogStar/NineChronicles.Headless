@@ -18,13 +18,17 @@ using Serilog.Formatting.Compact;
 using System;
 using System.Collections.Concurrent;
 using System.IO;
+using System.Linq;
 using System.Net.Http;
 using System.Reflection;
 using System.Threading;
 using System.Threading.Tasks;
+using Libplanet.Action;
 // import necessary for sentry exception filters
 using Libplanet.Blocks;
+using Libplanet.Headless;
 using Libplanet.Net.Transports;
+using Nekoyume.Action;
 
 namespace NineChronicles.Headless.Executable
 {
@@ -77,8 +81,6 @@ namespace NineChronicles.Headless.Executable
                 Description = "The private key used for signing messages and to specify your node. " +
                               "If you leave this null, a randomly generated value will be used.")]
             string? swarmPrivateKeyString = null,
-            [Option("workers", Description = "Number of workers to use in Swarm")]
-            int? workers = null,
             [Option(Description = "Disable block mining.")]
             bool? noMiner = null,
             [Option("miner-count", Description = "The number of miner task(thread).")]
@@ -200,11 +202,13 @@ namespace NineChronicles.Headless.Executable
                 HttpResponseMessage resp = await client.GetAsync(configPath);
                 resp.EnsureSuccessStatusCode();
                 Stream body = await resp.Content.ReadAsStreamAsync();
-                configurationBuilder.AddJsonStream(body);
+                configurationBuilder.AddJsonStream(body)
+                    .AddEnvironmentVariables();
             }
             else
             {
-                configurationBuilder.AddJsonFile(configPath);
+                configurationBuilder.AddJsonFile(configPath)
+                    .AddEnvironmentVariables();
             }
 
             // Setup logger.
@@ -216,7 +220,7 @@ namespace NineChronicles.Headless.Executable
             configuration.Bind("Headless", headlessConfig);
             headlessConfig.Overwrite(
                 appProtocolVersionToken, trustedAppProtocolVersionSigners, genesisBlockPath, host, port,
-                swarmPrivateKeyString, workers, storeType, storePath, noReduceStore, noMiner, minerCount,
+                swarmPrivateKeyString, storeType, storePath, noReduceStore, noMiner, minerCount,
                 minerPrivateKeyString, minerBlockIntervalMilliseconds, networkType, iceServerStrings, peerStrings, rpcServer, rpcListenHost,
                 rpcListenPort, rpcRemoteServer, rpcHttpServer, graphQLServer, graphQLHost, graphQLPort,
                 graphQLSecretTokenPath, noCors, nonblockRenderer, nonblockRendererQueue, strictRendering,
@@ -242,9 +246,7 @@ namespace NineChronicles.Headless.Executable
                 //o.Debug = true;
                 o.Release = Assembly.GetExecutingAssembly().GetCustomAttribute<AssemblyInformationalVersionAttribute>()
                     ?.InformationalVersion ?? "Unknown";
-                o.SampleRate = headlessConfig.SentryTraceSampleRate > 0
-                    ? (float)headlessConfig.SentryTraceSampleRate
-                    : 0.01f;
+                o.SampleRate = 0.01f;
                 o.TracesSampleRate = headlessConfig.SentryTraceSampleRate;
                 o.AddExceptionFilterForType<TimeoutException>();
                 o.AddExceptionFilterForType<IOException>();
@@ -328,7 +330,6 @@ namespace NineChronicles.Headless.Executable
                         headlessConfig.PeerStrings,
                         headlessConfig.TrustedAppProtocolVersionSignerStrings,
                         headlessConfig.NoMiner,
-                        workers: headlessConfig.Workers,
                         confirmations: headlessConfig.Confirmations,
                         nonblockRenderer: headlessConfig.NonblockRenderer,
                         nonblockRendererQueue: headlessConfig.NonblockRendererQueue,
@@ -354,11 +355,44 @@ namespace NineChronicles.Headless.Executable
                     properties.LogActionRenders = true;
                 }
 
+                IActionTypeLoader MakeStaticActionTypeLoader() => new StaticActionTypeLoader(
+                    Assembly.GetEntryAssembly() is { } entryAssembly
+                        ? new[] { typeof(ActionBase).Assembly, entryAssembly }
+                        : new[] { typeof(ActionBase).Assembly },
+                    typeof(ActionBase)
+                );
+
+                IActionTypeLoader actionTypeLoader;
+                if (headlessConfig.ActionTypeLoader is { } actionTypeLoaderConfiguration)
+                {
+                    if (actionTypeLoaderConfiguration.DynamicActionTypeLoader is { } dynamicActionTypeLoaderConf)
+                    {
+                        actionTypeLoader = new DynamicActionTypeLoader(
+                            dynamicActionTypeLoaderConf.BasePath,
+                            dynamicActionTypeLoaderConf.AssemblyFileName,
+                            dynamicActionTypeLoaderConf.HardForks.OrderBy(pair => pair.SinceBlockIndex));
+                    }
+                    else if (actionTypeLoaderConfiguration.StaticActionTypeLoader is { } staticActionTypeLoaderConf)
+                    {
+                        var assemblies = staticActionTypeLoaderConf.Assemblies?.Select(x => Assembly.Load(File.ReadAllBytes(x))).ToHashSet()
+                            ?? throw new CommandExitedException(-1);
+                        actionTypeLoader = new StaticActionTypeLoader(assemblies);
+                    }
+                    else
+                    {
+                        actionTypeLoader = MakeStaticActionTypeLoader();
+                    }
+                }
+                else
+                {
+                    actionTypeLoader = MakeStaticActionTypeLoader();
+                }
+
                 var minerPrivateKey = string.IsNullOrEmpty(headlessConfig.MinerPrivateKeyString)
                     ? null
                     : new PrivateKey(ByteUtil.ParseHex(headlessConfig.MinerPrivateKeyString));
                 TimeSpan minerBlockInterval = TimeSpan.FromMilliseconds(headlessConfig.MinerBlockIntervalMilliseconds);
-                var nineChroniclesProperties = new NineChroniclesNodeServiceProperties()
+                var nineChroniclesProperties = new NineChroniclesNodeServiceProperties(actionTypeLoader)
                 {
                     MinerPrivateKey = minerPrivateKey,
                     Libplanet = properties,

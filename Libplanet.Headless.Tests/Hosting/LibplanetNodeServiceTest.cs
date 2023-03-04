@@ -1,6 +1,8 @@
 using System;
+using System.Collections.Generic;
 using System.IO;
 using System.Net;
+using System.Reflection;
 using System.Security.Cryptography;
 using System.Threading.Tasks;
 using Bencodex.Types;
@@ -20,6 +22,14 @@ namespace Libplanet.Headless.Tests.Hosting
         public void Constructor()
         {
             var genesisBlock = BlockChain<DummyAction>.MakeGenesisBlock();
+
+            IActionTypeLoader actionTypeLoader = new StaticActionTypeLoader(
+                Assembly.GetEntryAssembly() is { } entryAssembly
+                    ? new[] { typeof(DummyAction).Assembly, entryAssembly }
+                    : new[] { typeof(DummyAction).Assembly },
+                typeof(DummyAction)
+            );
+
             var service = new LibplanetNodeService<DummyAction>(
                 new LibplanetNodeServiceProperties<DummyAction>()
                 {
@@ -29,6 +39,7 @@ namespace Libplanet.Headless.Tests.Hosting
                     StoreStatesCacheSize = 2,
                     StorePath = Path.Combine(Path.GetTempPath(), Guid.NewGuid().ToString()),
                     Host = IPAddress.Loopback.ToString(),
+                    IceServers = new List<IceServer>(),
                 },
                 blockPolicy: new BlockPolicy<DummyAction>(),
                 stagePolicy: new VolatileStagePolicy<DummyAction>(),
@@ -36,7 +47,8 @@ namespace Libplanet.Headless.Tests.Hosting
                 minerLoopAction: (chain, swarm, pk, ct) => Task.CompletedTask,
                 preloadProgress: null,
                 exceptionHandlerAction: (code, msg) => throw new Exception($"{code}, {msg}"),
-                preloadStatusHandlerAction: isPreloadStart => { }
+                preloadStatusHandlerAction: isPreloadStart => { },
+                actionTypeLoader: actionTypeLoader
             );
 
             Assert.NotNull(service);
@@ -47,6 +59,13 @@ namespace Libplanet.Headless.Tests.Hosting
         {
             Assert.Throws<ArgumentException>(() =>
             {
+                IActionTypeLoader actionTypeLoader = new StaticActionTypeLoader(
+                    Assembly.GetEntryAssembly() is { } entryAssembly
+                        ? new[] { typeof(DummyAction).Assembly, entryAssembly }
+                        : new[] { typeof(DummyAction).Assembly },
+                    typeof(DummyAction)
+                );
+
                 var service = new LibplanetNodeService<DummyAction>(
                     new LibplanetNodeServiceProperties<DummyAction>()
                     {
@@ -54,6 +73,7 @@ namespace Libplanet.Headless.Tests.Hosting
                         SwarmPrivateKey = new PrivateKey(),
                         StoreStatesCacheSize = 2,
                         Host = IPAddress.Loopback.ToString(),
+                        IceServers = new List<IceServer>(),
                     },
                     blockPolicy: new BlockPolicy<DummyAction>(),
                     stagePolicy: new VolatileStagePolicy<DummyAction>(),
@@ -61,7 +81,8 @@ namespace Libplanet.Headless.Tests.Hosting
                     minerLoopAction: (chain, swarm, pk, ct) => Task.CompletedTask,
                     preloadProgress: null,
                     exceptionHandlerAction: (code, msg) => throw new Exception($"{code}, {msg}"),
-                    preloadStatusHandlerAction: isPreloadStart => { }
+                    preloadStatusHandlerAction: isPreloadStart => { },
+                    actionTypeLoader: actionTypeLoader
                 );
             });
         }

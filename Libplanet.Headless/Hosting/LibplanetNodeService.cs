@@ -5,6 +5,7 @@ using System.IO;
 using System.Linq;
 using System.Net;
 using System.Net.Http;
+using System.Reflection;
 using System.Threading;
 using System.Threading.Tasks;
 using Bencodex;
@@ -16,6 +17,7 @@ using Libplanet.Blocks;
 using Libplanet.Crypto;
 using Libplanet.Net;
 using Libplanet.Net.Protocols;
+using Libplanet.Net.Transports;
 using Libplanet.RocksDBStore;
 using Libplanet.Store;
 using Libplanet.Store.Trie;
@@ -79,6 +81,7 @@ namespace Libplanet.Headless.Hosting
             Progress<PreloadState> preloadProgress,
             Action<RPCException, string> exceptionHandlerAction,
             Action<bool> preloadStatusHandlerAction,
+            IActionTypeLoader actionTypeLoader,
             bool ignoreBootstrapFailure = false,
             bool ignorePreloadFailure = false
         )
@@ -145,13 +148,32 @@ namespace Libplanet.Headless.Hosting
                 });
             }
 
+            var blockChainStates = new BlockChainStates<T>(Store, StateStore);
+
             BlockChain = new BlockChain<T>(
                 policy: blockPolicy,
                 store: Store,
                 stagePolicy: stagePolicy,
                 stateStore: StateStore,
                 genesisBlock: genesisBlock,
-                renderers: renderers
+                renderers: renderers,
+                blockChainStates: blockChainStates,
+                actionEvaluator: new ActionEvaluator<T>(
+                    blockHeader =>
+                    {
+                        var blockActionType = actionTypeLoader
+                            .LoadAllActionTypes(new ActionTypeLoaderContext(blockHeader.Index))
+                            .FirstOrDefault(t => t.FullName == "Nekoyume.Action.RewardGold");
+                        return blockActionType is { } t ? (IAction)Activator.CreateInstance(t) : null;
+                    },
+                    blockChainStates: blockChainStates,
+                    trieGetter: hash => StateStore.GetStateRoot(
+                        Store.GetBlockDigest(hash)?.StateRootHash
+                    ),
+                    genesisHash: genesisBlock.Hash,
+                    nativeTokenPredicate: blockPolicy.NativeTokens.Contains,
+                    actionTypeLoader: actionTypeLoader
+                )
             );
 
             _obsoletedChainIds = chainIds.Where(chainId => chainId != BlockChain.Id).ToList();
@@ -166,31 +188,39 @@ namespace Libplanet.Headless.Hosting
                 shuffledIceServers = iceServers.OrderBy(x => rand.Next());
             }
 
+            var appProtocolVersionOptions = new AppProtocolVersionOptions
+            {
+                AppProtocolVersion = Properties.AppProtocolVersion,
+                TrustedAppProtocolVersionSigners =
+                    Properties.TrustedAppProtocolVersionSigners?.ToImmutableHashSet() ?? ImmutableHashSet<PublicKey>.Empty,
+                DifferentAppProtocolVersionEncountered = Properties.DifferentAppProtocolVersionEncountered,
+            };
+            var hostOptions = new Net.HostOptions(Properties.Host, shuffledIceServers, Properties.Port ?? default);
+            var swarmOptions = new SwarmOptions
+            {
+                BranchpointThreshold = 50,
+                StaticPeers = Properties.StaticPeers,
+                MinimumBroadcastTarget = Properties.MinimumBroadcastTarget,
+                BucketSize = Properties.BucketSize,
+                MaximumPollPeers = Properties.MaximumPollPeers,
+                TimeoutOptions = new TimeoutOptions
+                {
+                    MaxTimeout = TimeSpan.FromSeconds(50),
+                    GetBlockHashesTimeout = TimeSpan.FromSeconds(50),
+                    GetBlocksBaseTimeout = TimeSpan.FromSeconds(5),
+                },
+            };
+
+            var transport = NetMQTransport.Create(
+                Properties.SwarmPrivateKey,
+                appProtocolVersionOptions,
+                hostOptions,
+                swarmOptions.MessageTimestampBuffer).ConfigureAwait(false).GetAwaiter().GetResult();
             Swarm = new Swarm<T>(
                 BlockChain,
                 Properties.SwarmPrivateKey,
-                Properties.AppProtocolVersion,
-                trustedAppProtocolVersionSigners: Properties.TrustedAppProtocolVersionSigners,
-                host: Properties.Host,
-                listenPort: Properties.Port,
-                iceServers: shuffledIceServers,
-                workers: Properties.Workers,
-                differentAppProtocolVersionEncountered: Properties.DifferentAppProtocolVersionEncountered,
-                options: new SwarmOptions
-                {
-                    BranchpointThreshold = 50,
-                    StaticPeers = Properties.StaticPeers,
-                    MinimumBroadcastTarget = Properties.MinimumBroadcastTarget,
-                    BucketSize = Properties.BucketSize,
-                    MaximumPollPeers = Properties.MaximumPollPeers,
-                    TimeoutOptions = new TimeoutOptions
-                    {
-                        MaxTimeout = TimeSpan.FromSeconds(50),
-                        GetBlockHashesTimeout = TimeSpan.FromSeconds(50),
-                        GetBlocksBaseTimeout = TimeSpan.FromSeconds(5),
-                    },
-                }
-            );
+                transport,
+                swarmOptions);
 
             PreloadEnded = new AsyncManualResetEvent();
             BootstrapEnded = new AsyncManualResetEvent();
@@ -617,6 +647,17 @@ namespace Libplanet.Headless.Hosting
 
             (Store as IDisposable)?.Dispose();
             Log.Debug("Store disposed.");
+        }
+
+        // FIXME: Request libplanet provide default implementation.
+        private sealed class ActionTypeLoaderContext : IActionTypeLoaderContext
+        {
+            public ActionTypeLoaderContext(long index)
+            {
+                Index = index;
+            }
+
+            public long Index { get; }
         }
     }
 }

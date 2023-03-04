@@ -1,4 +1,4 @@
-using Lib9c.Renderer;
+using Lib9c.Renderers;
 using Libplanet.Blockchain;
 using Libplanet.Blockchain.Policies;
 using Libplanet.Blockchain.Renderers;
@@ -21,6 +21,8 @@ using System;
 using System.Linq;
 using System.Collections.Generic;
 using System.Collections.Immutable;
+using System.Diagnostics.Metrics;
+using System.Reflection;
 using System.Security.Cryptography;
 using System.Threading;
 using System.Threading.Tasks;
@@ -29,6 +31,7 @@ using StrictRenderer =
     Libplanet.Blockchain.Renderers.Debug.ValidatingActionRenderer<Libplanet.Action.PolymorphicAction<Nekoyume.Action.ActionBase>>;
 using Libplanet.Blocks;
 using Libplanet;
+using Libplanet.Action;
 using Libplanet.Assets;
 
 namespace NineChronicles.Headless
@@ -77,6 +80,7 @@ namespace NineChronicles.Headless
             LibplanetNodeServiceProperties<NCAction> properties,
             IBlockPolicy<NCAction> blockPolicy,
             NetworkType networkType,
+            IActionTypeLoader actionTypeLoader,
             TimeSpan? minerBlockInterval = null,
             Progress<PreloadState>? preloadProgress = null,
             bool ignoreBootstrapFailure = false,
@@ -105,6 +109,7 @@ namespace NineChronicles.Headless
                     exc.Message.Split("\n")[0]
                 )
             );
+
             if (Properties.Render)
             {
                 renderers.Add(blockPolicySource.BlockRenderer);
@@ -143,7 +148,7 @@ namespace NineChronicles.Headless
                 PrivateKey privateKey,
                 CancellationToken cancellationToken)
             {
-                var miner = new Miner(chain, swarm, privateKey);
+                var miner = new Miner(chain, swarm, privateKey, actionTypeLoader);
                 Log.Debug("Miner called.");
                 while (!cancellationToken.IsCancellationRequested)
                 {
@@ -211,6 +216,7 @@ namespace NineChronicles.Headless
                 {
                     NodeStatusRenderer.PreloadStatus(isPreloadStarted);
                 },
+                actionTypeLoader,
                 ignoreBootstrapFailure,
                 ignorePreloadFailure
             );
@@ -254,12 +260,15 @@ namespace NineChronicles.Headless
                     );
                 };
 
-            var blockPolicy = NineChroniclesNodeService.GetBlockPolicy(properties.NetworkType);
+            var blockPolicy = NineChroniclesNodeService.GetBlockPolicy(
+                properties.NetworkType,
+                properties.ActionTypeLoader);
             var service = new NineChroniclesNodeService(
                 properties.MinerPrivateKey,
                 properties.Libplanet,
                 blockPolicy,
                 properties.NetworkType,
+                properties.ActionTypeLoader,
                 properties.MinerBlockInterval,
                 preloadProgress: progress,
                 ignoreBootstrapFailure: properties.IgnoreBootstrapFailure,
@@ -270,12 +279,25 @@ namespace NineChronicles.Headless
                 txQuotaPerSigner: properties.TxQuotaPerSigner
             );
             service.ConfigureContext(context);
+            var meter = new Meter("NineChronicles");
+            meter.CreateObservableGauge(
+                "ninechronicles_tip_index",
+                () => service.BlockChain.Tip.Index,
+                description: "The tip block's index.");
+            meter.CreateObservableGauge(
+                "ninechronicles_staged_txids_count",
+                () => service.BlockChain.GetStagedTransactionIds().Count,
+                description: "Number of staged transactions.");
+            meter.CreateObservableGauge(
+                "ninechronicles_subscriber_addresses_count",
+                () => context.AgentAddresses.Count);
+
             return service;
         }
 
-        internal static IBlockPolicy<NCAction> GetBlockPolicy(NetworkType networkType)
+        internal static IBlockPolicy<NCAction> GetBlockPolicy(NetworkType networkType, IActionTypeLoader actionTypeLoader)
         {
-            var source = new BlockPolicySource(Log.Logger, LogEventLevel.Debug);
+            var source = new BlockPolicySource(Log.Logger, LogEventLevel.Debug, actionTypeLoader);
             return networkType switch
             {
                 NetworkType.Main => source.GetPolicy(),

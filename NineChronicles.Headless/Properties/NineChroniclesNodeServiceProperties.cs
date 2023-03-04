@@ -2,6 +2,7 @@ using System;
 using System.Collections.Immutable;
 using System.Linq;
 using Libplanet;
+using Libplanet.Action;
 using Libplanet.Crypto;
 using Libplanet.Net;
 using Libplanet.Headless.Hosting;
@@ -12,6 +13,11 @@ namespace NineChronicles.Headless.Properties
 {
     public class NineChroniclesNodeServiceProperties
     {
+        public NineChroniclesNodeServiceProperties(IActionTypeLoader actionTypeLoader)
+        {
+            ActionTypeLoader = actionTypeLoader;
+        }
+
         /// <summary>
         /// Gets or sets a private key that is used in mining and signing transactions,
         /// which is different with the private key used in swarm to sign messages.
@@ -44,65 +50,8 @@ namespace NineChronicles.Headless.Properties
 
         public int TxQuotaPerSigner { get; set; }
 
-        public static LibplanetNodeServiceProperties<NineChroniclesActionType>
-            GenerateLibplanetNodeServiceProperties(
-                string? appProtocolVersionToken = null,
-                string? genesisBlockPath = null,
-                string? swarmHost = null,
-                ushort? swarmPort = null,
-                string? swarmPrivateKeyString = null,
-                string? storeType = null,
-                string? storePath = null,
-                int storeStateCacheSize = 100,
-                string[]? iceServerStrings = null,
-                string[]? peerStrings = null,
-                string[]? trustedAppProtocolVersionSigners = null,
-                bool noMiner = false,
-                bool render = false,
-                int workers = 5,
-                int confirmations = 0,
-                bool nonblockRenderer = false,
-                int nonblockRendererQueue = 512,
-                int messageTimeout = 60,
-                int tipTimeout = 60,
-                int demandBuffer = 1150,
-                string[]? staticPeerStrings = null,
-                bool preload = true,
-                int minimumBroadcastTarget = 10,
-                int bucketSize = 16,
-                string chainTipStaleBehaviorType = "reboot",
-                int maximumPollPeers = int.MaxValue)
-        {
-            return GenerateLibplanetNodeServiceProperties(
-                appProtocolVersionToken,
-                genesisBlockPath,
-                swarmHost,
-                swarmPort,
-                swarmPrivateKeyString,
-                storeType,
-                storePath,
-                false,
-                storeStateCacheSize,
-                iceServerStrings,
-                peerStrings,
-                trustedAppProtocolVersionSigners,
-                noMiner,
-                render,
-                workers,
-                confirmations,
-                nonblockRenderer,
-                nonblockRendererQueue,
-                messageTimeout,
-                tipTimeout,
-                demandBuffer,
-                staticPeerStrings,
-                preload,
-                minimumBroadcastTarget,
-                bucketSize,
-                chainTipStaleBehaviorType,
-                maximumPollPeers
-                );
-        }
+        public IActionTypeLoader ActionTypeLoader { get; init; }
+
         public static LibplanetNodeServiceProperties<NineChroniclesActionType>
             GenerateLibplanetNodeServiceProperties(
                 string? appProtocolVersionToken = null,
@@ -163,7 +112,6 @@ namespace NineChronicles.Headless.Properties
                 NoReduceStore = noReduceStore,
                 StoreStatesCacheSize = storeStateCacheSize,
                 Render = render,
-                Workers = workers,
                 Confirmations = Math.Max(confirmations, 0),
                 NonblockRenderer = nonblockRenderer,
                 NonblockRendererQueue = Math.Max(nonblockRendererQueue, 1),
@@ -175,7 +123,7 @@ namespace NineChronicles.Headless.Properties
                 MinimumBroadcastTarget = minimumBroadcastTarget,
                 BucketSize = bucketSize,
                 ChainTipStaleBehavior = chainTipStaleBehaviorType,
-                MaximumPollPeers = maximumPollPeers
+                MaximumPollPeers = maximumPollPeers,
             };
         }
 

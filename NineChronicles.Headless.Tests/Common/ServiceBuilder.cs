@@ -45,8 +45,14 @@ namespace NineChronicles.Headless.Tests.Common
                 TipTimeout = TimeSpan.FromMinutes(1),
                 DemandBuffer = 1150,
                 StaticPeers = ImmutableHashSet<BoundPeer>.Empty,
+                IceServers = ImmutableList<IceServer>.Empty,
             };
-            return new NineChroniclesNodeService(privateKey, properties, BlockPolicy, NetworkType.Test);
+            return new NineChroniclesNodeService(
+                privateKey,
+                properties,
+                BlockPolicy,
+                NetworkType.Test,
+                StaticActionTypeLoaderSingleton.Instance);
         }
     }
 }

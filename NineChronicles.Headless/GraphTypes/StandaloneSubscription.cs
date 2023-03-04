@@ -2,7 +2,7 @@ using GraphQL;
 using GraphQL.Resolvers;
 using GraphQL.Subscription;
 using GraphQL.Types;
-using Lib9c.Renderer;
+using Lib9c.Renderers;
 using Libplanet.Blocks;
 using Libplanet.Explorer.GraphTypes;
 using Libplanet.Headless;
@@ -164,54 +164,6 @@ namespace NineChronicles.Headless.GraphTypes
                     StandaloneContext.NodeExceptionSubject
                         .Sample(standaloneContext.NodeExceptionInterval)
                         .AsObservable()),
-            });
-            AddField(new EventStreamFieldType
-            {
-                Name = nameof(MonsterCollectionState),
-                Type = typeof(NonNullGraphType<MonsterCollectionStateType>),
-                Resolver = new FuncFieldResolver<MonsterCollectionState>(context => (context.Source as MonsterCollectionState)!),
-                Subscriber = new EventStreamResolver<MonsterCollectionState>(context =>
-                    standaloneContext.MonsterCollectionStateSubject
-                        .Sample(standaloneContext.MonsterCollectionStateInterval)
-                        .AsObservable()),
-            });
-            AddField(new EventStreamFieldType
-            {
-                Name = nameof(MonsterCollectionStatus),
-                Type = typeof(NonNullGraphType<MonsterCollectionStatusType>),
-                Resolver = new FuncFieldResolver<MonsterCollectionStatus>(context => (context.Source as MonsterCollectionStatus)!),
-                Subscriber = new EventStreamResolver<MonsterCollectionStatus>(context =>
-                    standaloneContext.MonsterCollectionStatusSubject
-                        .Sample(standaloneContext.MonsterCollectionStatusInterval)
-                        .AsObservable()),
-            });
-            AddField(new EventStreamFieldType
-            {
-                Name = $"{nameof(MonsterCollectionStatus)}ByAgent",
-                Arguments = new QueryArguments(
-                    new QueryArgument<NonNullGraphType<AddressType>>
-                    {
-                        Description = "A hex-encoded address of agent.",
-                        Name = "address",
-                    }
-                ),
-                Type = typeof(NonNullGraphType<MonsterCollectionStatusType>),
-                Resolver = new FuncFieldResolver<MonsterCollectionStatus>(context => (context.Source as MonsterCollectionStatus)!),
-                Subscriber = new EventStreamResolver<MonsterCollectionStatus>(SubscribeMonsterCollectionStatus),
-            });
-            AddField(new EventStreamFieldType
-            {
-                Name = $"{nameof(MonsterCollectionState)}ByAgent",
-                Arguments = new QueryArguments(
-                    new QueryArgument<NonNullGraphType<AddressType>>
-                    {
-                        Description = "A hex-encoded address of agent.",
-                        Name = "address",
-                    }
-                ),
-                Type = typeof(NonNullGraphType<MonsterCollectionStateType>),
-                Resolver = new FuncFieldResolver<MonsterCollectionState>(context => (context.Source as MonsterCollectionState)!),
-                Subscriber = new EventStreamResolver<MonsterCollectionState>(SubscribeMonsterCollectionState),
             });
             AddField(new EventStreamFieldType
             {
@@ -379,7 +331,7 @@ namespace NineChronicles.Headless.GraphTypes
             }
         }
 
-        private void RenderMonsterCollectionStateSubject<T>(ActionBase.ActionEvaluation<T> eval)
+        private void RenderMonsterCollectionStateSubject<T>(ActionEvaluation<T> eval)
             where T : ActionBase
         {
             if (!(StandaloneContext.NineChroniclesNodeService is { } service))
