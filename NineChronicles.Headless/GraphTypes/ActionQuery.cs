@@ -222,7 +222,7 @@ namespace NineChronicles.Headless.GraphTypes
                         Costumes = costumeIds,
                         Equipments = equipmentIds,
                         Foods = consumableIds,
-                        PlayCount = playCount,
+                        TotalPlayCount = playCount,
                         StageBuffId = buffId,
                     };
                     return Codec.Encode(action.PlainValue);

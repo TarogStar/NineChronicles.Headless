@@ -94,7 +94,7 @@ namespace NineChronicles.Headless.GraphTypes
                             Costumes = costumeIds,
                             Equipments = equipmentIds,
                             Foods = consumableIds,
-                            PlayCount = playCount,
+                            TotalPlayCount = playCount,
                             StageBuffId = buffId,
                         };
 
@@ -268,7 +268,7 @@ namespace NineChronicles.Headless.GraphTypes
                             Costumes = costumeIds,
                             Equipments = equipmentIds,
                             Foods = consumableIds,
-                            PlayCount = playCount,
+                            TotalPlayCount = playCount,
                             StageBuffId = buffId,
                             RuneInfos = runeSlotInfos,
                         };

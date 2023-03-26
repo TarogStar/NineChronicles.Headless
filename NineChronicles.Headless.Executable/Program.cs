@@ -404,11 +404,6 @@ namespace NineChronicles.Headless.Executable
                     actionTypeLoader = MakeStaticActionTypeLoader();
                 }
 
-                if (actionTypeLoader is StaticActionTypeLoader staticActionTypeLoader)
-                {
-                    PolymorphicAction<ActionBase>.ActionTypeLoader = staticActionTypeLoader;
-                }
-
                 var minerPrivateKey = string.IsNullOrEmpty(headlessConfig.MinerPrivateKeyString)
                     ? null
                     : new PrivateKey(ByteUtil.ParseHex(headlessConfig.MinerPrivateKeyString));
