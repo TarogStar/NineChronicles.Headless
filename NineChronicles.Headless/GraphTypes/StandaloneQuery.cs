@@ -504,7 +504,7 @@ namespace NineChronicles.Headless.GraphTypes
                     {
                         hashedSignature = hasher.ComputeHash(transaction.Signature);
                     }
-                    byte[] preEvaluationHashBytes = preEvaluationHash.ToBuilder().ToArray();
+                    byte[] preEvaluationHashBytes = preEvaluationHash.ToByteArray();
                     int seed =
                     (preEvaluationHashBytes.Length > 0
                         ? BitConverter.ToInt32(preEvaluationHashBytes, 0) : 0)
@@ -770,7 +770,7 @@ namespace NineChronicles.Headless.GraphTypes
                     {
                         hashedSignature = hasher.ComputeHash(transaction.Signature);
                     }
-                    byte[] preEvaluationHashBytes = preEvaluationHash.ToBuilder().ToArray();
+                    byte[] preEvaluationHashBytes = preEvaluationHash.ToByteArray();
                     int seed =
                     (preEvaluationHashBytes.Length > 0
                         ? BitConverter.ToInt32(preEvaluationHashBytes, 0) : 0)
