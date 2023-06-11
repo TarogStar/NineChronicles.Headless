@@ -2,6 +2,7 @@ using System;
 using System.Collections.Generic;
 using System.IO;
 using System.Linq;
+using System.Numerics;
 using System.Text.Json;
 using Bencodex;
 using Bencodex.Types;
@@ -78,7 +79,7 @@ namespace NineChronicles.Headless.Executable.Commands
             if (config.Value.InitialCurrencyDeposit is null || config.Value.InitialCurrencyDeposit.Count == 0)
             {
                 _console.Out.WriteLine("Initial currency deposit list not provided. " +
-                                $"Give initial {DefaultCurrencyValue} currency to InitialMinter");
+                                       $"Give initial {DefaultCurrencyValue} currency to InitialMinter");
                 initialDepositList.Add(new GoldDistribution
                 {
                     Address = initialMinter.ToAddress(),
@@ -123,6 +124,33 @@ namespace NineChronicles.Headless.Executable.Commands
             }
 
             _console.Out.WriteLine("Admin config done");
+        }
+
+        private void ProcessValidator(List<Validator>? config, PrivateKey initialValidator,
+            out List<Validator> initialValidatorSet)
+        {
+            _console.Out.WriteLine("\nProcessing initial validator set for genesis...");
+            initialValidatorSet = new List<Validator>();
+            if (config is null || config.Count == 0)
+            {
+                _console.Out.WriteLine(
+                    "InitialValidatorSet not provided. Use initial minter as initial validator."
+                );
+                initialValidatorSet.Add(new Validator
+                {
+                    PublicKey = initialValidator.PublicKey.ToString(),
+                    Power = 1,
+                }
+                );
+            }
+            else
+            {
+                initialValidatorSet = config.ToList();
+            }
+
+            var str = initialValidatorSet.Aggregate(string.Empty,
+                (s, v) => s + "PublicKey: " + v.PublicKey + ", Power: " + v.Power + "\n");
+            _console.Out.WriteLine($"Initial validator set config done: {str}");
         }
 
         private void ProcessExtra(ExtraConfig? config,
@@ -171,16 +199,22 @@ namespace NineChronicles.Headless.Executable.Commands
 
                 ProcessAdmin(genesisConfig.Admin, initialMinter, out var adminState);
 
-                ProcessExtra(genesisConfig.Extra, out List<PendingActivationState> pendingActivationStates);
+                ProcessValidator(genesisConfig.InitialValidatorSet, initialMinter, out var initialValidatorSet);
+
+                ProcessExtra(genesisConfig.Extra,
+                    out var pendingActivationStates);
 
                 // Mine genesis block
                 _console.Out.WriteLine("\nMining genesis block...\n");
-                Block<PolymorphicAction<ActionBase>> block = BlockHelper.MineGenesisBlock(
+                Block block = BlockHelper.ProposeGenesisBlock(
                     tableSheets: tableSheets,
                     goldDistributions: initialDepositList.ToArray(),
                     pendingActivationStates: pendingActivationStates.ToArray(),
                     adminState: adminState,
-                    privateKey: initialMinter
+                    privateKey: initialMinter,
+                    initialValidators: initialValidatorSet.ToDictionary(
+                        item => new PublicKey(ByteUtil.ParseHex(item.PublicKey)),
+                        item => new BigInteger(item.Power))
                 );
 
                 Lib9cUtils.ExportBlock(block, "genesis-block");
@@ -193,7 +227,7 @@ namespace NineChronicles.Headless.Executable.Commands
                     else
                     {
                         _console.Out.WriteLine("Admin privilege has been granted to given admin address. " +
-                                          "Keep this account in secret.");
+                                               "Keep this account in secret.");
                     }
                 }
 
@@ -203,7 +237,7 @@ namespace NineChronicles.Headless.Executable.Commands
                     if (string.IsNullOrEmpty(genesisConfig.Currency?.InitialMinter))
                     {
                         _console.Out.WriteLine("No currency data provided. Initial minter gets initial deposition.\n" +
-                                          "Please check `initial_deposit.csv` file to get detailed info.");
+                                               "Please check `initial_deposit.csv` file to get detailed info.");
                         File.WriteAllText("initial_deposit.csv",
                             "Address,PrivateKey,AmountPerBlock,StartBlock,EndBlock\n");
                         File.AppendAllText("initial_deposit.csv",
@@ -212,7 +246,7 @@ namespace NineChronicles.Headless.Executable.Commands
                     else
                     {
                         _console.Out.WriteLine("No initial deposit data provided. " +
-                                          "Initial minter you provided gets initial deposition.");
+                                               "Initial minter you provided gets initial deposition.");
                     }
                 }
 
@@ -281,6 +315,14 @@ namespace NineChronicles.Headless.Executable.Commands
             public long ValidUntil { get; set; }
         }
 
+        [Serializable]
+        private struct Validator
+        {
+            public string PublicKey { get; set; }
+
+            public long Power { get; set; }
+        }
+
         /// <summary>
         /// Extra configurations.
         /// </summary>
@@ -316,6 +358,10 @@ namespace NineChronicles.Headless.Executable.Commands
         /// <description>Optional. Sets game admin and lifespan to genesis block.</description>
         /// </item>
         /// <item>
+        /// <term><see cref="InitialValidatorSet">Initial validator set</see></term>
+        /// <description>Optional. Sets game admin and lifespan to genesis block.</description>
+        /// </item>
+        /// <item>
         /// <term><see cref="ExtraConfig">Extra</see></term>
         /// <description>Optional. Sets extra data (e.g. activation keys) to genesis block.</description>
         /// </item>
@@ -326,6 +372,7 @@ namespace NineChronicles.Headless.Executable.Commands
             public DataConfig Data { get; set; } // Required
             public CurrencyConfig? Currency { get; set; }
             public AdminConfig? Admin { get; set; }
+            public List<Validator>? InitialValidatorSet { get; set; }
             public ExtraConfig? Extra { get; set; }
         }
 #pragma warning restore S3459

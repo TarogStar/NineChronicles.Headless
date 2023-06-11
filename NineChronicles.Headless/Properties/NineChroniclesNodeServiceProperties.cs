@@ -2,20 +2,19 @@ using System;
 using System.Collections.Immutable;
 using System.Linq;
 using Libplanet;
-using Libplanet.Action;
+using Libplanet.Action.Loader;
 using Libplanet.Crypto;
 using Libplanet.Net;
 using Libplanet.Headless.Hosting;
-using NineChroniclesActionType = Libplanet.Action.PolymorphicAction<Nekoyume.Action.ActionBase>;
 using Libplanet.Headless;
 
 namespace NineChronicles.Headless.Properties
 {
     public class NineChroniclesNodeServiceProperties
     {
-        public NineChroniclesNodeServiceProperties(IActionTypeLoader actionTypeLoader)
+        public NineChroniclesNodeServiceProperties(IActionLoader actionLoader)
         {
-            ActionTypeLoader = actionTypeLoader;
+            ActionLoader = actionLoader;
         }
 
         /// <summary>
@@ -25,7 +24,7 @@ namespace NineChronicles.Headless.Properties
         /// <seealso cref="LibplanetNodeServiceProperties{T}.SwarmPrivateKey"/>
         public PrivateKey? MinerPrivateKey { get; set; }
 
-        public LibplanetNodeServiceProperties<NineChroniclesActionType>? Libplanet { get; set; }
+        public LibplanetNodeServiceProperties? Libplanet { get; set; }
 
         public NetworkType NetworkType { get; set; } = NetworkType.Main;
 
@@ -50,9 +49,9 @@ namespace NineChronicles.Headless.Properties
 
         public int TxQuotaPerSigner { get; set; }
 
-        public IActionTypeLoader ActionTypeLoader { get; init; }
+        public IActionLoader ActionLoader { get; init; }
 
-        public static LibplanetNodeServiceProperties<NineChroniclesActionType>
+        public static LibplanetNodeServiceProperties
             GenerateLibplanetNodeServiceProperties(
                 string? appProtocolVersionToken = null,
                 string? genesisBlockPath = null,
@@ -75,26 +74,31 @@ namespace NineChronicles.Headless.Properties
                 int messageTimeout = 60,
                 int tipTimeout = 60,
                 int demandBuffer = 1150,
-                string[]? staticPeerStrings = null,
                 bool preload = true,
                 int minimumBroadcastTarget = 10,
                 int bucketSize = 16,
                 string chainTipStaleBehaviorType = "reboot",
-                int maximumPollPeers = int.MaxValue)
+                int maximumPollPeers = int.MaxValue,
+                ushort? consensusPort = null,
+                string? consensusPrivateKeyString = null,
+                string[]? consensusSeedStrings = null,
+                IActionEvaluatorConfiguration? actionEvaluatorConfiguration = null)
         {
             var swarmPrivateKey = string.IsNullOrEmpty(swarmPrivateKeyString)
                 ? new PrivateKey()
                 : new PrivateKey(ByteUtil.ParseHex(swarmPrivateKeyString));
+            var consensusPrivateKey = string.IsNullOrEmpty(consensusPrivateKeyString)
+                ? null
+                : new PrivateKey(ByteUtil.ParseHex(consensusPrivateKeyString));
 
             peerStrings ??= Array.Empty<string>();
             iceServerStrings ??= Array.Empty<string>();
-            staticPeerStrings ??= Array.Empty<string>();
 
             var iceServers = iceServerStrings.Select(PropertyParser.ParseIceServer).ToImmutableArray();
             var peers = peerStrings.Select(PropertyParser.ParsePeer).ToImmutableArray();
-            var staticPeers = staticPeerStrings.Select(PropertyParser.ParsePeer).ToImmutableHashSet();
+            var consensusSeeds = consensusSeedStrings?.Select(PropertyParser.ParsePeer).ToImmutableList();
 
-            return new LibplanetNodeServiceProperties<NineChroniclesActionType>
+            return new LibplanetNodeServiceProperties
             {
                 Host = swarmHost,
                 Port = swarmPort,
@@ -118,12 +122,15 @@ namespace NineChronicles.Headless.Properties
                 MessageTimeout = TimeSpan.FromSeconds(messageTimeout),
                 TipTimeout = TimeSpan.FromSeconds(tipTimeout),
                 DemandBuffer = demandBuffer,
-                StaticPeers = staticPeers,
                 Preload = preload,
                 MinimumBroadcastTarget = minimumBroadcastTarget,
                 BucketSize = bucketSize,
                 ChainTipStaleBehavior = chainTipStaleBehaviorType,
                 MaximumPollPeers = maximumPollPeers,
+                ConsensusPort = consensusPort,
+                ConsensusSeeds = consensusSeeds,
+                ConsensusPrivateKey = consensusPrivateKey,
+                ActionEvaluatorConfiguration = actionEvaluatorConfiguration ?? new DefaultActionEvaluatorConfiguration(),
             };
         }
 

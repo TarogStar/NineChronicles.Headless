@@ -3,20 +3,24 @@ using System.Collections.Generic;
 using System.Collections.Immutable;
 using System.IO;
 using System.Linq;
-using System.Security.Cryptography;
+using System.Numerics;
 using System.Text;
 using System.Text.Json;
-using System.Threading.Tasks;
+using Bencodex.Types;
 using Libplanet;
 using Libplanet.Action;
+using Libplanet.Action.Loader;
+using Libplanet.Action.Sys;
 using Libplanet.Blockchain;
 using Libplanet.Blockchain.Policies;
 using Libplanet.Blocks;
 using Libplanet.Extensions.Cocona;
+using Libplanet.Consensus;
 using Libplanet.Crypto;
 using Libplanet.RocksDBStore;
 using Libplanet.Store;
 using Libplanet.Store.Trie;
+using Libplanet.Tx;
 using Nekoyume;
 using Nekoyume.Action;
 using Nekoyume.BlockChain.Policy;
@@ -54,8 +58,7 @@ namespace NineChronicles.Headless.Executable.Tests.Commands
         [InlineData(StoreType.RocksDb)]
         public void Tip(StoreType storeType)
         {
-            HashAlgorithmType hashAlgo = HashAlgorithmType.Of<SHA256>();
-            Block<NCAction> genesisBlock = BlockChain<NCAction>.MakeGenesisBlock();
+            Block genesisBlock = BlockChain<NCAction>.ProposeGenesisBlock();
             IStore store = storeType.CreateStore(_storePath);
             Guid chainId = Guid.NewGuid();
             store.SetCanonicalChainId(chainId);
@@ -65,7 +68,7 @@ namespace NineChronicles.Headless.Executable.Tests.Commands
 
             // FIXME For an unknown reason, BlockHeader.TimeStamp precision issue occurred and the store we should open it again.
             store = storeType.CreateStore(_storePath);
-            genesisBlock = store.GetBlock<NCAction>(genesisBlock.Hash);
+            genesisBlock = store.GetBlock(genesisBlock.Hash);
             store.Dispose();
 
             _command.Tip(storeType, _storePath);
@@ -78,24 +81,37 @@ namespace NineChronicles.Headless.Executable.Tests.Commands
         [Theory]
         [InlineData(StoreType.Default)]
         [InlineData(StoreType.RocksDb)]
-        public async Task Inspect(StoreType storeType)
+        public void Inspect(StoreType storeType)
         {
-            Block<NCAction> genesisBlock = BlockChain<NCAction>.MakeGenesisBlock();
+            var proposer = new PrivateKey();
+            Block genesisBlock = BlockChain<NCAction>.ProposeGenesisBlock(
+                transactions: new IAction[]
+                    {
+                        new Initialize(
+                            validatorSet: new ValidatorSet(
+                                new[] { new Validator(proposer.PublicKey, BigInteger.One) }.ToList()
+                            ),
+                            states: ImmutableDictionary.Create<Address, IValue>()
+                        )
+                    }.Select((sa, nonce) => Transaction.Create(nonce, new PrivateKey(), null, new[] { sa }))
+                    .ToImmutableList());
             IStore store = storeType.CreateStore(_storePath);
-            Guid chainId = Guid.NewGuid();
-            store.SetCanonicalChainId(chainId);
-            store.PutBlock(genesisBlock);
-            store.AppendIndex(chainId, genesisBlock.Hash);
             var stateStore = new TrieStateStore(new RocksDBKeyValueStore(Path.Combine(_storePath, "states")));
 
             IStagePolicy<NCAction> stagePolicy = new VolatileStagePolicy<PolymorphicAction<ActionBase>>();
-            IBlockPolicy<NCAction> blockPolicy = new BlockPolicySource(Logger.None).GetPolicy();
-            BlockChain<NCAction> chain = new BlockChain<NCAction>(
+            IBlockPolicy<NCAction> blockPolicy = new BlockPolicySource(Logger.None).GetTestPolicy();
+            ActionEvaluator actionEvaluator = new ActionEvaluator(
+                _ => blockPolicy.BlockAction,
+                new BlockChainStates(store, stateStore),
+                new SingleActionLoader(typeof(NCAction)),
+                null);
+            BlockChain<NCAction> chain = BlockChain<NCAction>.Create(
                 blockPolicy,
                 stagePolicy,
                 store,
                 stateStore,
-                genesisBlock);
+                genesisBlock,
+                actionEvaluator);
 
             var action = new HackAndSlash
             {
@@ -108,9 +124,9 @@ namespace NineChronicles.Headless.Executable.Tests.Commands
                 RuneInfos = new List<RuneSlotInfo>(),
             };
 
-            var minerKey = new PrivateKey();
-            chain.MakeTransaction(minerKey, new PolymorphicAction<ActionBase>[] { action });
-            await chain.MineBlock(minerKey, DateTimeOffset.Now);
+            chain.MakeTransaction(proposer, new PolymorphicAction<ActionBase>[] { action });
+            Block block = chain.ProposeBlock(proposer);
+            chain.Append(block, GenerateBlockCommit(block, proposer));
             store.Dispose();
             stateStore.Dispose();
 
@@ -127,24 +143,38 @@ namespace NineChronicles.Headless.Executable.Tests.Commands
         [Theory]
         [InlineData(StoreType.Default)]
         [InlineData(StoreType.RocksDb)]
-        public async Task Truncate(StoreType storeType)
+        public void Truncate(StoreType storeType)
         {
-            Block<NCAction> genesisBlock = BlockChain<NCAction>.MakeGenesisBlock();
+            var proposer = new PrivateKey();
+            Block genesisBlock = BlockChain<NCAction>.ProposeGenesisBlock(
+                transactions: new IAction[]
+                    {
+                        new Initialize(
+                            validatorSet: new ValidatorSet(
+                                new[] { new Validator(proposer.PublicKey, BigInteger.One) }.ToList()
+                            ),
+                            states: ImmutableDictionary.Create<Address, IValue>()
+                        )
+                    }.Select((sa, nonce) => Transaction.Create(nonce, new PrivateKey(), null, new[] { sa }))
+                    .ToImmutableList());
             IStore store = storeType.CreateStore(_storePath);
-            Guid chainId = Guid.NewGuid();
-            store.SetCanonicalChainId(chainId);
-            store.PutBlock(genesisBlock);
-            store.AppendIndex(chainId, genesisBlock.Hash);
             var stateStore = new TrieStateStore(new RocksDBKeyValueStore(Path.Combine(_storePath, "states")));
 
             IStagePolicy<NCAction> stagePolicy = new VolatileStagePolicy<NCAction>();
-            IBlockPolicy<NCAction> blockPolicy = new BlockPolicySource(Logger.None).GetPolicy();
-            BlockChain<NCAction> chain = new BlockChain<NCAction>(
+            IBlockPolicy<NCAction> blockPolicy = new BlockPolicy<NCAction>();
+            ActionEvaluator actionEvaluator = new ActionEvaluator(
+                _ => blockPolicy.BlockAction,
+                new BlockChainStates(store, stateStore),
+                new SingleActionLoader(typeof(NCAction)),
+                null);
+            BlockChain<NCAction> chain = BlockChain<NCAction>.Create(
                 blockPolicy,
                 stagePolicy,
                 store,
                 stateStore,
-                genesisBlock);
+                genesisBlock,
+                actionEvaluator);
+            Guid chainId = chain.Id;
 
             var action = new HackAndSlash
             {
@@ -157,11 +187,22 @@ namespace NineChronicles.Headless.Executable.Tests.Commands
                 RuneInfos = new List<RuneSlotInfo>(),
             };
 
-            var minerKey = new PrivateKey();
+
             for (var i = 0; i < 2; i++)
             {
-                chain.MakeTransaction(minerKey, new NCAction[] { action });
-                await chain.MineBlock(minerKey, DateTimeOffset.Now);
+                chain.MakeTransaction(proposer, new NCAction[] { action });
+                if (chain.Tip.Index < 1)
+                {
+                    Block block = chain.ProposeBlock(proposer);
+                    chain.Append(block, GenerateBlockCommit(block, proposer));
+                }
+                else
+                {
+                    Block block = chain.ProposeBlock(
+                        proposer,
+                        lastCommit: GenerateBlockCommit(chain.Tip, proposer));
+                    chain.Append(block, GenerateBlockCommit(block, proposer));
+                }
             }
 
             var indexCountBeforeTruncate = store.CountIndex(chainId);
@@ -184,22 +225,23 @@ namespace NineChronicles.Headless.Executable.Tests.Commands
         {
             IStore store = storeType.CreateStore(_storePath);
             var statesPath = Path.Combine(_storePath, "states");
-            Guid chainId = Guid.NewGuid();
-            store.SetCanonicalChainId(chainId);
             var genesisBlock = MineGenesisBlock();
-            store.PutBlock(genesisBlock);
-            store.AppendIndex(chainId, genesisBlock.Hash);
             var stateKeyValueStore = new RocksDBKeyValueStore(statesPath);
             var stateStore = new TrieStateStore(stateKeyValueStore);
             IStagePolicy<NCAction> stagePolicy = new VolatileStagePolicy<NCAction>();
             IBlockPolicy<NCAction> blockPolicy = new BlockPolicySource(Logger.None).GetPolicy();
-            BlockChain<NCAction> chain = new BlockChain<NCAction>(
+            ActionEvaluator actionEvaluator = new ActionEvaluator(
+                _ => blockPolicy.BlockAction,
+                new BlockChainStates(store, stateStore),
+                new SingleActionLoader(typeof(NCAction)),
+                null);
+            BlockChain<NCAction> chain = BlockChain<NCAction>.Create(
                 blockPolicy,
                 stagePolicy,
                 store,
                 stateStore,
-                genesisBlock);
-            chain.ExecuteActions(chain.Tip);
+                genesisBlock,
+                actionEvaluator);
             int prevStatesCount = stateKeyValueStore.ListKeys().Count();
             stateKeyValueStore.Set(
                 new KeyBytes("alpha", Encoding.UTF8),
@@ -222,25 +264,27 @@ namespace NineChronicles.Headless.Executable.Tests.Commands
 
         [Theory]
         [InlineData(StoreType.RocksDb)]
-        public async Task Snapshot(StoreType storeType)
+        public void Snapshot(StoreType storeType)
         {
             IStore store = storeType.CreateStore(_storePath);
             var statesPath = Path.Combine(_storePath, "states");
-            Guid chainId = Guid.NewGuid();
-            store.SetCanonicalChainId(chainId);
             var genesisBlock = MineGenesisBlock();
-            store.PutBlock(genesisBlock);
-            store.AppendIndex(chainId, genesisBlock.Hash);
             var stateKeyValueStore = new RocksDBKeyValueStore(statesPath);
             var stateStore = new TrieStateStore(stateKeyValueStore);
             IStagePolicy<NCAction> stagePolicy = new VolatileStagePolicy<NCAction>();
             IBlockPolicy<NCAction> blockPolicy = new BlockPolicySource(Logger.None).GetPolicy();
-            BlockChain<NCAction> chain = new BlockChain<NCAction>(
+            ActionEvaluator actionEvaluator = new ActionEvaluator(
+                _ => blockPolicy.BlockAction,
+                new BlockChainStates(store, stateStore),
+                new SingleActionLoader(typeof(NCAction)),
+                null);
+            BlockChain<NCAction> chain = BlockChain<NCAction>.Create(
                 blockPolicy,
                 stagePolicy,
                 store,
                 stateStore,
-                genesisBlock);
+                genesisBlock,
+                actionEvaluator);
             var action = new HackAndSlash
             {
                 Costumes = new List<Guid>(),
@@ -251,15 +295,17 @@ namespace NineChronicles.Headless.Executable.Tests.Commands
                 AvatarAddress = default,
                 RuneInfos = new List<RuneSlotInfo>(),
             };
+            Guid chainId = chain.Id;
 
-            var minerKey = new PrivateKey();
             for (var i = 0; i < 2; i++)
             {
-                chain.MakeTransaction(minerKey, new NCAction[] { action });
-                await chain.MineBlock(minerKey, DateTimeOffset.Now);
+                chain.MakeTransaction(GenesisHelper.ValidatorKey, new NCAction[] { action });
+                Block block = chain.ProposeBlock(
+                    GenesisHelper.ValidatorKey,
+                    lastCommit: GenerateBlockCommit(chain.Tip, GenesisHelper.ValidatorKey));
+                chain.Append(block, GenerateBlockCommit(block, GenesisHelper.ValidatorKey));
             }
 
-            chain.ExecuteActions(chain.Tip);
             var indexCountBeforeSnapshot = store.CountIndex(chainId);
             const int blockEpochUnitSeconds = 86400;
             var blockEpoch = (int)(chain.Tip.Timestamp.ToUnixTimeSeconds() / blockEpochUnitSeconds);
@@ -311,7 +357,7 @@ namespace NineChronicles.Headless.Executable.Tests.Commands
             Directory.Delete(outputDirectory, true);
         }
 
-        private Block<NCAction> MineGenesisBlock()
+        private Block MineGenesisBlock()
         {
             Dictionary<string, string> tableSheets = Lib9cUtils.ImportSheets("../../../../Lib9c/Lib9c/TableCSV");
             var goldDistributionPath = Path.GetTempFileName();
@@ -321,7 +367,7 @@ F9A15F870701268Bd7bBeA6502eB15F4997f32f9,100,1,100000
 Fb90278C67f9b266eA309E6AE8463042f5461449,3000,3600,13600
 Fb90278C67f9b266eA309E6AE8463042f5461449,100000000000,2,2
 ");
-            var privateKey = new PrivateKey();
+            var privateKey = GenesisHelper.AdminKey;
             goldDistributionPath = goldDistributionPath.Replace(Path.DirectorySeparatorChar, Path.AltDirectorySeparatorChar);
             var config = new Dictionary<string, object>
             {
@@ -356,18 +402,41 @@ Fb90278C67f9b266eA309E6AE8463042f5461449,100000000000,2,2
                 .LoadInDescendingEndBlockOrder(goldDistributionPath);
             AdminState adminState =
                 new AdminState(new Address(genesisConfig.AdminAddress), genesisConfig.AdminValidUntil);
-            Block<NCAction> genesisBlock = BlockHelper.MineGenesisBlock(
+            Block genesisBlock = BlockHelper.ProposeGenesisBlock(
                 tableSheets,
                 goldDistributions,
                 pendingActivationStates.ToArray(),
                 adminState,
                 authorizedMinersState,
                 ImmutableHashSet<Address>.Empty,
+                new Dictionary<PublicKey, BigInteger>
+                {
+                    {
+                        GenesisHelper.ValidatorKey.PublicKey, BigInteger.One
+                    }
+                },
                 genesisConfig.ActivationKeyCount != 0,
                 null,
                 new PrivateKey(ByteUtil.ParseHex(genesisConfig.PrivateKey))
             );
             return genesisBlock;
+        }
+
+        private BlockCommit? GenerateBlockCommit(Block block, PrivateKey validator)
+        {
+            return block.Index != 0
+                ? new BlockCommit(
+                    block.Index,
+                    0,
+                    block.Hash,
+                    ImmutableArray<Vote>.Empty.Add(new VoteMetadata(
+                        block.Index,
+                        0,
+                        block.Hash,
+                        DateTimeOffset.UtcNow,
+                        validator.PublicKey,
+                        VoteFlag.PreCommit).Sign(validator)))
+                : null;
         }
 
         [Serializable]

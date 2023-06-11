@@ -12,6 +12,8 @@ using Bencodex.Types;
 using Cocona;
 using Lib9c.DevExtensions;
 using Libplanet;
+using Libplanet.Action;
+using Libplanet.Assets;
 using Libplanet.Blockchain;
 using Libplanet.Blockchain.Policies;
 using Libplanet.Blocks;
@@ -25,6 +27,8 @@ namespace NineChronicles.Headless.Executable.Commands
 {
     public class StateCommand : CoconaLiteConsoleAppBase
     {
+        private const string ValidatorSetKey = "___";
+
         private static readonly Codec _codec = new Codec();
         private readonly IConsole _console;
 
@@ -75,8 +79,8 @@ namespace NineChronicles.Headless.Executable.Commands
                 chainId,
                 useMemoryKvStore is string p ? new MemoryKeyValueStore(p, stderr) : null
             );
-            Block<NCAction> bottom = Utils.ParseBlockOffset(chain, bottommost, 0);
-            Block<NCAction> top = Utils.ParseBlockOffset(chain, topmost);
+            Block bottom = Utils.ParseBlockOffset(chain, bottommost, 0);
+            Block top = Utils.ParseBlockOffset(chain, topmost);
 
             stderr.WriteLine("It will execute all actions (tx actions & block actions)");
             stderr.WriteLine(
@@ -87,7 +91,7 @@ namespace NineChronicles.Headless.Executable.Commands
             stderr.WriteLine("    ...to the block #{0} {1}.", top.Index, top.Hash);
 
             IBlockPolicy<NCAction> policy = chain.Policy;
-            (Block<NCAction>, string)? invalidStateRootHashBlock = null;
+            (Block, string)? invalidStateRootHashBlock = null;
             long totalBlocks = top.Index - bottom.Index + 1;
             long blocksExecuted = 0L;
             long txsExecuted = 0L;
@@ -104,9 +108,9 @@ namespace NineChronicles.Headless.Executable.Commands
                     throw new CommandExitedException(1);
                 }
 
-                Block<NCAction> block =
-                    store.GetBlock<NCAction>(blockHash);
-                var preEvalBlock = new PreEvaluationBlock<NCAction>(
+                Block block =
+                    store.GetBlock(blockHash);
+                var preEvalBlock = new PreEvaluationBlock(
                     block,
                     block.Transactions
                 );
@@ -117,16 +121,14 @@ namespace NineChronicles.Headless.Executable.Commands
                     block.Index,
                     block.Hash
                 );
-                IImmutableDictionary<string, IValue> delta;
+                IReadOnlyList<IActionEvaluation> delta;
                 HashDigest<SHA256> stateRootHash = block.Index < 1
-                    ? preEvalBlock.DetermineStateRootHash(
+                    ? BlockChain<NCAction>.DetermineGenesisStateRootHash(
+                        preEvalBlock,
                         policy.BlockAction,
-                        policy.NativeTokens.Contains,
-                        stateStore,
                         out delta)
-                    : preEvalBlock.DetermineStateRootHash(
-                        chain,
-                        StateCompleterSet<NCAction>.Reject,
+                    : chain.DetermineBlockStateRootHash(
+                        preEvalBlock,
                         out delta);
                 DateTimeOffset now = DateTimeOffset.Now;
                 if (invalidStateRootHashBlock is null && !stateRootHash.Equals(block.StateRootHash))
@@ -137,8 +139,7 @@ namespace NineChronicles.Headless.Executable.Commands
                     );
                     string deltaDump = DumpBencodexToFile(
                         new Dictionary(
-                            delta.Select(kv =>
-                                new KeyValuePair<IKey, IValue>(new Text(kv.Key), kv.Value))),
+                            GetTotalDelta(delta, ToStateKey, ToFungibleAssetKey, ToTotalSupplyKey, ValidatorSetKey)),
                         $"delta_{block.Index}_{block.Hash}"
                     );
                     string message =
@@ -222,7 +223,7 @@ namespace NineChronicles.Headless.Executable.Commands
                 storePath,
                 chainId
             );
-            Block<NCAction> checkBlock = Utils.ParseBlockOffset(chain, block);
+            Block checkBlock = Utils.ParseBlockOffset(chain, block);
             HashDigest<SHA256> stateRootHash = checkBlock.StateRootHash;
             ITrie stateRoot = stateStore.GetStateRoot(stateRootHash);
             bool exist = stateRoot.Recorded;
@@ -241,7 +242,7 @@ namespace NineChronicles.Headless.Executable.Commands
 
             logger.Information("Finding the latest ancestor block having its states...");
 
-            bool WillGoFurther(Block<NCAction> b)
+            bool WillGoFurther(Block b)
             {
                 if (cancellationToken.IsCancellationRequested)
                 {
@@ -282,11 +283,11 @@ namespace NineChronicles.Headless.Executable.Commands
             throw new CommandExitedException(1);
         }
 
-        private static Block<NCAction>? BisectBlocks(
+        private static Block? BisectBlocks(
             BlockChain<NCAction> chain,
             long start,
             long end,
-            Predicate<Block<NCAction>> willGoFurther
+            Predicate<Block> willGoFurther
         )
         {
             long tip = chain.Tip.Index;
@@ -299,7 +300,7 @@ namespace NineChronicles.Headless.Executable.Commands
                 idx = Math.Min(upper, idx);
                 idx = Math.Max(lower, idx);
 
-                Block<NCAction> b = chain[idx];
+                Block b = chain[idx];
                 if (willGoFurther(b))
                 {
                     long nextStart = idx == end ? idx + dir : idx;
@@ -426,5 +427,81 @@ namespace NineChronicles.Headless.Executable.Commands
             IEnumerable<KeyBytes> IKeyValueStore.ListKeys() =>
                 _dictionary.Keys;
         }
+
+        private static ImmutableDictionary<string, IValue> GetTotalDelta(
+            IReadOnlyList<IActionEvaluation> actionEvaluations,
+            Func<Address, string> toStateKey,
+            Func<(Address, Currency), string> toFungibleAssetKey,
+            Func<Currency, string> toTotalSupplyKey,
+            string validatorSetKey)
+        {
+            IImmutableSet<Address> stateUpdatedAddresses = actionEvaluations
+                .SelectMany(a => a.OutputStates.StateUpdatedAddresses)
+                .ToImmutableHashSet();
+            IImmutableSet<(Address, Currency)> updatedFungibleAssets = actionEvaluations
+                .SelectMany(a => a.OutputStates.UpdatedFungibleAssets
+                    .SelectMany(kv => kv.Value.Select(c => (kv.Key, c))))
+                .ToImmutableHashSet();
+            IImmutableSet<Currency> updatedTotalSupplies = actionEvaluations
+                .SelectMany(a => a.OutputStates.TotalSupplyUpdatedCurrencies)
+                .ToImmutableHashSet();
+
+            if (actionEvaluations.Count == 0)
+            {
+                return ImmutableDictionary<string, IValue>.Empty;
+            }
+
+            IAccountStateDelta lastStates = actionEvaluations[actionEvaluations.Count - 1].OutputStates;
+
+            ImmutableDictionary<string, IValue> totalDelta =
+                stateUpdatedAddresses.ToImmutableDictionary(
+                    toStateKey,
+                    a => lastStates.GetState(a) ??
+                         throw new InvalidOperationException(
+                             "If it was updated well, the output states will include it also.")
+                ).SetItems(
+                    updatedFungibleAssets.Select(pair =>
+                        new KeyValuePair<string, IValue>(
+                            toFungibleAssetKey(pair),
+                            new Bencodex.Types.Integer(
+                                lastStates.GetBalance(pair.Item1, pair.Item2).RawValue
+                            )
+                        )
+                    )
+                );
+
+            foreach (var currency in updatedTotalSupplies)
+            {
+                if (lastStates.GetTotalSupply(currency).RawValue is { } rawValue)
+                {
+                    totalDelta = totalDelta.SetItem(
+                        toTotalSupplyKey(currency),
+                        new Bencodex.Types.Integer(rawValue)
+                    );
+                }
+            }
+
+            if (lastStates.GetValidatorSet() is { } validatorSet && validatorSet.Validators.Any())
+            {
+                totalDelta = totalDelta.SetItem(
+                    validatorSetKey,
+                    validatorSet.Bencoded
+                );
+            }
+
+            return totalDelta;
+        }
+
+        private static string ToStateKey(Address address) => ByteUtil.Hex(address.ByteArray);
+
+        private static string ToFungibleAssetKey(Address address, Currency currency) =>
+            "_" + ByteUtil.Hex(address.ByteArray) +
+            "_" + ByteUtil.Hex(currency.Hash.ByteArray);
+
+        private static string ToFungibleAssetKey((Address, Currency) pair) =>
+            ToFungibleAssetKey(pair.Item1, pair.Item2);
+
+        private static string ToTotalSupplyKey(Currency currency) =>
+            "__" + ByteUtil.Hex(currency.Hash.ByteArray);
     }
 }

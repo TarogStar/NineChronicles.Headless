@@ -22,7 +22,7 @@ namespace NineChronicles.Headless.Executable.Commands
     public partial class ReplayCommand : CoconaLiteConsoleAppBase
     {
         /// <summary>
-        /// Almost duplicate https://github.com/planetarium/libplanet/blob/main/Libplanet/Action/AccountStateDeltaImpl.cs
+        /// Almost duplicate https://github.com/planetarium/libplanet/blob/main/Libplanet/Action/AccountStateDeltaImpl.cs.
         /// </summary>
         private class AccountStateDeltaImpl : IAccountStateDelta
         {
@@ -404,13 +404,12 @@ namespace NineChronicles.Headless.Executable.Commands
         }
 
         /// <summary>
-        /// Almost duplicate https://github.com/planetarium/libplanet/blob/main/Libplanet/Action/ActionContext.cs
+        /// Almost duplicate https://github.com/planetarium/libplanet/blob/main/Libplanet/Action/ActionContext.cs.
         /// </summary>
         private sealed class ActionContext : IActionContext
         {
             private readonly int _randomSeed;
             private readonly ITrie? _previousBlockStatesTrie;
-            private readonly Predicate<Currency>? _nativeTokenPredicate;
             private HashDigest<SHA256>? _previousStateRootHash;
 
             public ActionContext(
@@ -423,8 +422,7 @@ namespace NineChronicles.Headless.Executable.Commands
                 int randomSeed,
                 bool rehearsal = false,
                 ITrie? previousBlockStatesTrie = null,
-                bool blockAction = false,
-                Predicate<Currency>? nativeTokenPredicate = null)
+                bool blockAction = false)
             {
                 GenesisHash = genesisHash;
                 Signer = signer;
@@ -437,7 +435,6 @@ namespace NineChronicles.Headless.Executable.Commands
                 _randomSeed = randomSeed;
                 _previousBlockStatesTrie = previousBlockStatesTrie;
                 BlockAction = blockAction;
-                _nativeTokenPredicate = nativeTokenPredicate;
             }
 
             public BlockHash? GenesisHash { get; }
@@ -472,9 +469,6 @@ namespace NineChronicles.Headless.Executable.Commands
                 // NOTE: Not implemented yet. See also Lib9c.Tests.Action.ActionContext.PutLog().
             }
 
-            public bool IsNativeToken(Currency currency) =>
-                _nativeTokenPredicate is { } && _nativeTokenPredicate(currency);
-
             public IActionContext GetUnconsumedContext() =>
                 new ActionContext(
                     GenesisHash,
@@ -486,8 +480,11 @@ namespace NineChronicles.Headless.Executable.Commands
                     _randomSeed,
                     Rehearsal,
                     _previousBlockStatesTrie,
-                    BlockAction,
-                    _nativeTokenPredicate);
+                    BlockAction);
+
+            public long GasUsed() => 0;
+
+            public long GasLimit() => 0;
 
             private IImmutableDictionary<string, IValue?> GetUpdatedRawStates(
                 IAccountStateDelta delta)
@@ -558,7 +555,7 @@ namespace NineChronicles.Headless.Executable.Commands
         }
 
         /// <summary>
-        /// Almost duplicate https://github.com/planetarium/libplanet/blob/main/Libplanet/Action/ActionEvaluator.cs#L286
+        /// Almost duplicate https://github.com/planetarium/libplanet/blob/main/Libplanet/Action/ActionEvaluator.cs#L286.
         /// </summary>
         private static IEnumerable<ActionEvaluation> EvaluateActions(
             BlockHash? genesisHash,
@@ -570,7 +567,6 @@ namespace NineChronicles.Headless.Executable.Commands
             Address signer,
             byte[] signature,
             IImmutableList<IAction> actions,
-            Predicate<Currency> nativeTokenPredicate,
             bool rehearsal = false,
             ITrie? previousBlockStatesTrie = null,
             bool blockAction = false,
@@ -588,8 +584,7 @@ namespace NineChronicles.Headless.Executable.Commands
                     randomSeed: randomSeed,
                     rehearsal: rehearsal,
                     previousBlockStatesTrie: previousBlockStatesTrie,
-                    blockAction: blockAction,
-                    nativeTokenPredicate: nativeTokenPredicate);
+                    blockAction: blockAction);
             }
 
             byte[] hashedSignature;
@@ -599,7 +594,7 @@ namespace NineChronicles.Headless.Executable.Commands
             }
 
             byte[] preEvaluationHashBytes = preEvaluationHash.ToBuilder().ToArray();
-            int seed = ActionEvaluator<NCAction>.GenerateRandomSeed(
+            int seed = ActionEvaluator.GenerateRandomSeed(
                 preEvaluationHashBytes,
                 hashedSignature,
                 signature,
@@ -677,7 +672,7 @@ namespace NineChronicles.Headless.Executable.Commands
                             "{Message}\nInnerException: {ExcMessage}", innerMessage, e.Message);
                         exc = new UnexpectedlyTerminatedActionException(
                             innerMessage,
-                            preEvaluationHash,
+                            new HashDigest<SHA256>(preEvaluationHash),
                             blockIndex,
                             txid,
                             stateRootHash,

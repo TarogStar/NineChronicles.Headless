@@ -20,8 +20,8 @@ using NineChronicles.Headless.Properties;
 using NineChronicles.Headless.Requests;
 using NineChronicles.Headless.Tests.Common;
 using Xunit;
-using IPAddress = System.Net.IPAddress;
 using static NineChronicles.Headless.Tests.GraphQLTestUtils;
+using IPAddress = System.Net.IPAddress;
 
 namespace NineChronicles.Headless.Tests.Controllers
 {
@@ -56,7 +56,7 @@ namespace NineChronicles.Headless.Tests.Controllers
             }
 
             ConfigureNineChroniclesNodeService();
-            Assert.IsType<OkObjectResult>(_controller.SetMining(new SetMiningRequest
+            Assert.IsType<OkResult>(_controller.SetMining(new SetMiningRequest
             {
                 Mine = mine,
             }));
@@ -167,7 +167,7 @@ namespace NineChronicles.Headless.Tests.Controllers
         {
             _standaloneContext.NineChroniclesNodeService = new NineChroniclesNodeService(
                 new PrivateKey(),
-                new LibplanetNodeServiceProperties<PolymorphicAction<ActionBase>>
+                new LibplanetNodeServiceProperties
                 {
                     GenesisBlock = _standaloneContext.BlockChain!.Genesis,
                     StorePath = Path.Combine(Path.GetTempPath(), Path.GetRandomFileName()),
@@ -176,9 +176,9 @@ namespace NineChronicles.Headless.Tests.Controllers
                     Host = IPAddress.Loopback.ToString(),
                     IceServers = new List<IceServer>(),
                 },
-                NineChroniclesNodeService.GetBlockPolicy(NetworkType.Test, StaticActionTypeLoaderSingleton.Instance),
+                NineChroniclesNodeService.GetBlockPolicy(NetworkType.Test, StaticActionLoaderSingleton.Instance),
                 NetworkType.Test,
-                StaticActionTypeLoaderSingleton.Instance);
+                StaticActionLoaderSingleton.Instance);
         }
     }
 }

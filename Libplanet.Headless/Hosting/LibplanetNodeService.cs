@@ -3,19 +3,21 @@ using System.Collections.Generic;
 using System.Collections.Immutable;
 using System.IO;
 using System.Linq;
-using System.Net;
 using System.Net.Http;
-using System.Reflection;
 using System.Threading;
 using System.Threading.Tasks;
 using Bencodex;
 using Libplanet.Action;
+using Libplanet.Action.Loader;
 using Libplanet.Blockchain;
 using Libplanet.Blockchain.Policies;
 using Libplanet.Blockchain.Renderers;
 using Libplanet.Blocks;
 using Libplanet.Crypto;
+using Libplanet.Extensions.ForkableActionEvaluator;
+using Libplanet.Extensions.RemoteActionEvaluator;
 using Libplanet.Net;
+using Libplanet.Net.Consensus;
 using Libplanet.Net.Protocols;
 using Libplanet.Net.Transports;
 using Libplanet.RocksDBStore;
@@ -42,13 +44,11 @@ namespace Libplanet.Headless.Hosting
 
         public readonly Swarm<T> Swarm;
 
-        public readonly LibplanetNodeServiceProperties<T> Properties;
+        public readonly LibplanetNodeServiceProperties Properties;
 
         public AsyncManualResetEvent BootstrapEnded { get; }
 
         public AsyncManualResetEvent PreloadEnded { get; }
-
-        private Func<BlockChain<T>, Swarm<T>, PrivateKey, CancellationToken, Task> _minerLoopAction;
 
         private readonly bool _ignorePreloadFailure;
 
@@ -62,8 +62,6 @@ namespace Libplanet.Headless.Hosting
 
         protected CancellationToken SwarmCancellationToken;
 
-        protected CancellationTokenSource MiningCancellationTokenSource;
-
         private bool _stopRequested = false;
 
         protected static readonly TimeSpan BootstrapInterval = TimeSpan.FromMinutes(5);
@@ -73,17 +71,17 @@ namespace Libplanet.Headless.Hosting
         private List<Guid> _obsoletedChainIds;
 
         public LibplanetNodeService(
-            LibplanetNodeServiceProperties<T> properties,
+            LibplanetNodeServiceProperties properties,
             IBlockPolicy<T> blockPolicy,
             IStagePolicy<T> stagePolicy,
-            IEnumerable<IRenderer<T>> renderers,
-            Func<BlockChain<T>, Swarm<T>, PrivateKey, CancellationToken, Task> minerLoopAction,
+            IEnumerable<IRenderer> renderers,
             Progress<PreloadState> preloadProgress,
             Action<RPCException, string> exceptionHandlerAction,
             Action<bool> preloadStatusHandlerAction,
-            IActionTypeLoader actionTypeLoader,
+            IActionLoader actionLoader,
             bool ignoreBootstrapFailure = false,
-            bool ignorePreloadFailure = false
+            bool ignorePreloadFailure = false,
+            bool useRemoteActionEvaluator = false
         )
         {
             if (blockPolicy is null)
@@ -109,76 +107,74 @@ namespace Libplanet.Headless.Hosting
 
             if (Properties.Confirmations > 0)
             {
-                IComparer<IBlockExcerpt> comparer = blockPolicy.CanonicalChainComparer;
-                int confirms = Properties.Confirmations;
-                renderers = renderers.Select(r => r is IActionRenderer<T> ar
-                    ? new DelayedActionRenderer<T>(ar, comparer, Store, confirms, 50)
-                    : new DelayedRenderer<T>(r, comparer, Store, confirms)
-                );
-
                 // Log the outmost (before delayed) events as well as
                 // the innermost (after delayed) events:
                 ILogger logger = Log.ForContext("SubLevel", " RAW-RENDER-EVENT");
-                renderers = renderers.Select(r => r is IActionRenderer<T> ar
-                    ? new LoggedActionRenderer<T>(ar, logger, LogEventLevel.Debug)
-                    : new LoggedRenderer<T>(r, logger, LogEventLevel.Debug)
+                renderers = renderers.Select(r => r is IActionRenderer ar
+                    ? new LoggedActionRenderer(ar, logger, LogEventLevel.Debug)
+                    : new LoggedRenderer(r, logger, LogEventLevel.Debug)
                 );
             }
 
-            if (Properties.NonblockRenderer)
+            var blockChainStates = new BlockChainStates(Store, StateStore);
+            IActionEvaluator BuildActionEvaluator(IActionEvaluatorConfiguration actionEvaluatorConfiguration)
             {
-                renderers = renderers.Select(r =>
+                return actionEvaluatorConfiguration switch
                 {
-                    if (r is IActionRenderer<T> ar)
-                    {
-                        return new NonblockActionRenderer<T>(
-                            ar,
-                            Properties.NonblockRendererQueue,
-                            NonblockActionRenderer<T>.FullMode.DropOldest
-                        );
-                    }
-                    else
-                    {
-                        return new NonblockRenderer<T>(
-                            r,
-                            Properties.NonblockRendererQueue,
-                            NonblockActionRenderer<T>.FullMode.DropOldest
-                        );
-                    }
-                });
+                    RemoteActionEvaluatorConfiguration remoteActionEvaluatorConfiguration => new RemoteActionEvaluator(
+                        new Uri(remoteActionEvaluatorConfiguration.StateServiceEndpoint), blockChainStates),
+                    DefaultActionEvaluatorConfiguration _ => new ActionEvaluator(
+                        _ => blockPolicy.BlockAction,
+                        blockChainStates: blockChainStates,
+                        actionTypeLoader: actionLoader,
+                        feeCalculator: null
+                    ),
+                    ForkableActionEvaluatorConfiguration forkableActionEvaluatorConfiguration => new
+                        ForkableActionEvaluator(
+                            forkableActionEvaluatorConfiguration.Pairs.Select(pair => (
+                                (pair.Item1.Start, pair.Item1.End), BuildActionEvaluator(pair.Item2)
+                            ))
+                        ),
+                    _ => throw new InvalidOperationException("Unexpected type."),
+                };
             }
 
-            var blockChainStates = new BlockChainStates<T>(Store, StateStore);
+            IActionEvaluator actionEvaluator = BuildActionEvaluator(properties.ActionEvaluatorConfiguration);
 
-            BlockChain = new BlockChain<T>(
-                policy: blockPolicy,
-                store: Store,
-                stagePolicy: stagePolicy,
-                stateStore: StateStore,
-                genesisBlock: genesisBlock,
-                renderers: renderers,
-                blockChainStates: blockChainStates,
-                actionEvaluator: new ActionEvaluator<T>(
-                    blockHeader =>
-                    {
-                        var blockActionType = actionTypeLoader
-                            .LoadAllActionTypes(new ActionTypeLoaderContext(blockHeader.Index))
-                            .FirstOrDefault(t => t.FullName == "Nekoyume.Action.RewardGold");
-                        return blockActionType is { } t ? (IAction)Activator.CreateInstance(t) : null;
-                    },
+            if (Store.GetCanonicalChainId() is { })
+            {
+                BlockChain = new BlockChain<T>(
+                    policy: blockPolicy,
+                    store: Store,
+                    stagePolicy: stagePolicy,
+                    stateStore: StateStore,
+                    genesisBlock: genesisBlock,
+                    renderers: renderers,
                     blockChainStates: blockChainStates,
-                    trieGetter: hash => StateStore.GetStateRoot(
-                        Store.GetBlockDigest(hash)?.StateRootHash
-                    ),
-                    genesisHash: genesisBlock.Hash,
-                    nativeTokenPredicate: blockPolicy.NativeTokens.Contains,
-                    actionTypeLoader: actionTypeLoader
-                )
-            );
+                    actionEvaluator: actionEvaluator
+                );
+            }
+            else
+            {
+                BlockChain = BlockChain<T>.Create(
+                    policy: blockPolicy,
+                    store: Store,
+                    stagePolicy: stagePolicy,
+                    stateStore: StateStore,
+                    genesisBlock: genesisBlock,
+                    renderers: renderers,
+                    blockChainStates: blockChainStates,
+                    actionEvaluator: new ActionEvaluator(
+                        _ => blockPolicy.BlockAction,
+                        blockChainStates: blockChainStates,
+                        actionTypeLoader: actionLoader,
+                        feeCalculator: null
+                    )
+                );
+            }
 
             _obsoletedChainIds = chainIds.Where(chainId => chainId != BlockChain.Id).ToList();
 
-            _minerLoopAction = minerLoopAction;
             _exceptionHandlerAction = exceptionHandlerAction;
             _preloadStatusHandlerAction = preloadStatusHandlerAction;
             IEnumerable<IceServer> shuffledIceServers = null;
@@ -195,15 +191,14 @@ namespace Libplanet.Headless.Hosting
                     Properties.TrustedAppProtocolVersionSigners?.ToImmutableHashSet() ?? ImmutableHashSet<PublicKey>.Empty,
                 DifferentAppProtocolVersionEncountered = Properties.DifferentAppProtocolVersionEncountered,
             };
-            var hostOptions = new Net.HostOptions(Properties.Host, shuffledIceServers, Properties.Port ?? default);
-            var swarmOptions = new SwarmOptions
+            var hostOptions = new Net.Options.HostOptions(Properties.Host, shuffledIceServers, Properties.Port ?? default);
+            var swarmOptions = new Net.Options.SwarmOptions
             {
                 BranchpointThreshold = 50,
-                StaticPeers = Properties.StaticPeers,
                 MinimumBroadcastTarget = Properties.MinimumBroadcastTarget,
                 BucketSize = Properties.BucketSize,
                 MaximumPollPeers = Properties.MaximumPollPeers,
-                TimeoutOptions = new TimeoutOptions
+                TimeoutOptions = new Net.Options.TimeoutOptions
                 {
                     MaxTimeout = TimeSpan.FromSeconds(50),
                     GetBlockHashesTimeout = TimeSpan.FromSeconds(50),
@@ -216,11 +211,45 @@ namespace Libplanet.Headless.Hosting
                 appProtocolVersionOptions,
                 hostOptions,
                 swarmOptions.MessageTimestampBuffer).ConfigureAwait(false).GetAwaiter().GetResult();
+
+            NetMQTransport consensusTransport = null;
+            ConsensusReactorOption? consensusReactorOption = null;
+
+            // One of consensus seeds or consensus peers should not be null
+            if (!(Properties.ConsensusPrivateKey is null) &&
+                !(Properties.Host is null) &&
+                !(Properties.ConsensusPort is null) &&
+                !(Properties.ConsensusSeeds is null && Properties.ConsensusPeers is null))
+            {
+                consensusTransport = NetMQTransport.Create(
+                    Properties.ConsensusPrivateKey,
+                    appProtocolVersionOptions,
+                    new Net.Options.HostOptions(Properties.Host, shuffledIceServers, (int)Properties.ConsensusPort),
+                    swarmOptions.MessageTimestampBuffer).ConfigureAwait(false).GetAwaiter().GetResult();
+                consensusReactorOption = new ConsensusReactorOption
+                {
+                    SeedPeers = Properties.ConsensusSeeds!,
+                    ConsensusPeers = Properties.ConsensusPeers!,
+                    ConsensusPort = (int)Properties.ConsensusPort,
+                    ConsensusPrivateKey = Properties.ConsensusPrivateKey,
+                    ConsensusWorkers = 500,
+                    TargetBlockInterval = TimeSpan.FromSeconds(7)
+                };
+            }
+
+            Log.Debug(
+                "Initializing {Swarm}. {Reactor}: {Validator}",
+                nameof(Swarm),
+                nameof(ConsensusReactor<T>),
+                !(consensusReactorOption is null));
+
             Swarm = new Swarm<T>(
                 BlockChain,
                 Properties.SwarmPrivateKey,
                 transport,
-                swarmOptions);
+                swarmOptions,
+                consensusTransport,
+                consensusOption: consensusReactorOption);
 
             PreloadEnded = new AsyncManualResetEvent();
             BootstrapEnded = new AsyncManualResetEvent();
@@ -259,42 +288,6 @@ namespace Libplanet.Headless.Hosting
                 }
             });
 
-        // 이 privateKey는 swarm에서 사용하는 privateKey와 다를 수 있습니다.
-        public virtual void StartMining(PrivateKey privateKey)
-        {
-            if (BlockChain is null)
-            {
-                throw new InvalidOperationException(
-                    $"An exception occurred during {nameof(StartMining)}(). " +
-                    $"{nameof(BlockChain)} is null.");
-            }
-
-            if (Swarm is null)
-            {
-                throw new InvalidOperationException(
-                    $"An exception occurred during {nameof(StartMining)}(). " +
-                    $"{nameof(Swarm)} is null.");
-            }
-
-            if (privateKey is null)
-            {
-                throw new InvalidOperationException(
-                    $"An exception occurred during {nameof(StartMining)}(). " +
-                    $"{nameof(privateKey)} is null.");
-            }
-
-            MiningCancellationTokenSource =
-                CancellationTokenSource.CreateLinkedTokenSource(SwarmCancellationToken);
-            Task.Run(
-                () => _minerLoopAction(BlockChain, Swarm, privateKey, MiningCancellationTokenSource.Token),
-                MiningCancellationTokenSource.Token);
-        }
-
-        public void StopMining()
-        {
-            MiningCancellationTokenSource?.Cancel();
-        }
-
         public async Task<bool> CheckPeer(string addr)
         {
             var address = new Address(addr);
@@ -306,9 +299,8 @@ namespace Libplanet.Headless.Hosting
         public override async Task StopAsync(CancellationToken cancellationToken)
         {
             _stopRequested = true;
-            StopMining();
             await Swarm.StopAsync(cancellationToken);
-            foreach (IRenderer<T> renderer in BlockChain.Renderers)
+            foreach (IRenderer renderer in BlockChain.Renderers)
             {
                 if (renderer is IDisposable disposableRenderer)
                 {
@@ -546,7 +538,6 @@ namespace Libplanet.Headless.Hosting
                                 Log.Error("Start preloading due to staled tip.");
                                 await Swarm.PreloadAsync(
                                     PreloadProgress,
-                                    render: true,
                                     cancellationToken: cancellationToken
                                 );
                                 Log.Error(
@@ -607,8 +598,8 @@ namespace Libplanet.Headless.Hosting
             }
         }
 
-        protected Block<T> LoadGenesisBlock(
-            LibplanetNodeServiceProperties<T> properties
+        protected Block LoadGenesisBlock(
+            LibplanetNodeServiceProperties properties
         )
         {
             if (!(properties.GenesisBlock is null))
@@ -629,12 +620,12 @@ namespace Libplanet.Headless.Hosting
                     rawBlock = client.GetByteArrayAsync(uri).Result;
                 }
                 var blockDict = (Bencodex.Types.Dictionary)Codec.Decode(rawBlock);
-                return BlockMarshaler.UnmarshalBlock<T>(blockDict);
+                return BlockMarshaler.UnmarshalBlock(blockDict);
             }
             else
             {
                 throw new ArgumentException(
-                    $"At least, one of {nameof(LibplanetNodeServiceProperties<T>.GenesisBlock)} or {nameof(LibplanetNodeServiceProperties<T>.GenesisBlockPath)} must be set.");
+                    $"At least, one of {nameof(LibplanetNodeServiceProperties.GenesisBlock)} or {nameof(LibplanetNodeServiceProperties.GenesisBlockPath)} must be set.");
             }
         }
 

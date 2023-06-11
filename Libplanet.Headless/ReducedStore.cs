@@ -57,9 +57,8 @@ namespace Libplanet.Headless
         public void ForkTxNonces(Guid sourceChainId, Guid destinationChainId) =>
             InternalStore.ForkTxNonces(sourceChainId, destinationChainId);
 
-        public Block<T> GetBlock<T>(BlockHash blockHash)
-            where T : IAction, new() =>
-            InternalStore.GetBlock<T>(blockHash);
+        public Block GetBlock(BlockHash blockHash)
+            => InternalStore.GetBlock(blockHash);
 
         public BlockDigest? GetBlockDigest(BlockHash blockHash) =>
             InternalStore.GetBlockDigest(blockHash);
@@ -70,8 +69,8 @@ namespace Libplanet.Headless
         public Guid? GetCanonicalChainId() =>
             InternalStore.GetCanonicalChainId();
 
-        public Transaction<T> GetTransaction<T>(TxId txid) where T : IAction, new() =>
-            InternalStore.GetTransaction<T>(txid);
+        public Transaction GetTransaction(TxId txid) =>
+            InternalStore.GetTransaction(txid);
 
         public TxExecution GetTxExecution(BlockHash blockHash, TxId txid) =>
             InternalStore.GetTxExecution(blockHash, txid);
@@ -101,10 +100,10 @@ namespace Libplanet.Headless
         public IEnumerable<KeyValuePair<Address, long>> ListTxNonces(Guid chainId) =>
             InternalStore.ListTxNonces(chainId);
 
-        public void PutBlock<T>(Block<T> block) where T : IAction, new() =>
+        public void PutBlock(Block block) =>
             InternalStore.PutBlock(block);
 
-        public void PutTransaction<T>(Transaction<T> tx) where T : IAction, new() =>
+        public void PutTransaction(Transaction tx) =>
             InternalStore.PutTransaction(tx);
 
         public void PutTxExecution(TxSuccess txSuccess)
@@ -141,6 +140,24 @@ namespace Libplanet.Headless
 
         public void PruneOutdatedChains(bool noopWithoutCanon = false) =>
             InternalStore.PruneOutdatedChains(noopWithoutCanon);
+
+        public BlockCommit GetChainBlockCommit(Guid chainId) =>
+            InternalStore.GetChainBlockCommit(chainId);
+
+        public void PutChainBlockCommit(Guid chainId, BlockCommit blockCommit) =>
+            InternalStore.PutChainBlockCommit(chainId, blockCommit);
+
+        public BlockCommit GetBlockCommit(BlockHash blockHash) =>
+            InternalStore.GetBlockCommit(blockHash);
+
+        public void PutBlockCommit(BlockCommit blockCommit) =>
+            InternalStore.PutBlockCommit(blockCommit);
+
+        public void DeleteBlockCommit(BlockHash blockHash) =>
+            InternalStore.DeleteBlockCommit(blockHash);
+
+        public IEnumerable<BlockHash> GetBlockCommitHashes() =>
+            InternalStore.GetBlockCommitHashes();
 
         public void Dispose() => InternalStore.Dispose();
     }

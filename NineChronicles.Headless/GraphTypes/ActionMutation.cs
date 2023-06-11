@@ -99,7 +99,7 @@ namespace NineChronicles.Headless.GraphTypes
                         };
 
                         var actions = new NCAction[] { action };
-                        Transaction<NCAction> tx = blockChain.MakeTransaction(service.MinerPrivateKey, actions);
+                        var tx = blockChain.MakeTransaction(service.MinerPrivateKey, actions);
                         return tx.Id;
                     }
                     catch (Exception e)
@@ -175,7 +175,7 @@ namespace NineChronicles.Headless.GraphTypes
                         };
 
                         var actions = new NCAction[] { action };
-                        Transaction<NCAction> tx = blockChain.MakeTransaction(privateKey, actions);
+                        Transaction tx = blockChain.MakeTransaction(privateKey, actions);
                         return tx.Id;
                     }
                     catch (Exception e)
@@ -274,7 +274,7 @@ namespace NineChronicles.Headless.GraphTypes
                         };
 
                         var actions = new NCAction[] { action };
-                        Transaction<NCAction> tx = blockChain.MakeTransaction(service.MinerPrivateKey, actions);
+                        Transaction tx = blockChain.MakeTransaction(service.MinerPrivateKey, actions);
                         return tx.Id;
                     }
                     catch (Exception e)
@@ -335,7 +335,7 @@ namespace NineChronicles.Headless.GraphTypes
                         };
 
                         var actions = new NCAction[] { action };
-                        Transaction<NCAction> tx = blockChain.MakeTransaction(service.MinerPrivateKey, actions);
+                        Transaction tx = blockChain.MakeTransaction(service.MinerPrivateKey, actions);
                         return tx.Id;
                     }
                     catch (Exception e)
@@ -399,7 +399,7 @@ namespace NineChronicles.Headless.GraphTypes
                         };
 
                         var actions = new NCAction[] { action };
-                        Transaction<NCAction> tx = blockChain.MakeTransaction(privatekey, actions);
+                        Transaction tx = blockChain.MakeTransaction(privatekey, actions);
                         return tx.Id;
                     }
                     catch (Exception e)
@@ -442,7 +442,7 @@ namespace NineChronicles.Headless.GraphTypes
                         };
 
                         var actions = new NCAction[] { action };
-                        Transaction<NCAction> tx = blockChain.MakeTransaction(privateKey, actions);
+                        Transaction tx = blockChain.MakeTransaction(privateKey, actions);
                         return tx.Id;
                     }
                     catch (Exception e)
@@ -484,7 +484,7 @@ namespace NineChronicles.Headless.GraphTypes
                         };
 
                         var actions = new NCAction[] { action };
-                        Transaction<NCAction> tx = blockChain.MakeTransaction(privateKey, actions);
+                        Transaction tx = blockChain.MakeTransaction(privateKey, actions);
                         return tx.Id;
                     }
                     catch (Exception e)
@@ -537,7 +537,7 @@ namespace NineChronicles.Headless.GraphTypes
                         };
 
                         var actions = new NCAction[] { action };
-                        Transaction<NCAction> tx = blockChain.MakeTransaction(service.MinerPrivateKey, actions);
+                        Transaction tx = blockChain.MakeTransaction(service.MinerPrivateKey, actions);
                         return tx.Id;
                     }
                     catch (Exception e)
@@ -580,7 +580,7 @@ namespace NineChronicles.Headless.GraphTypes
                         };
 
                         var actions = new NCAction[] { action };
-                        Transaction<NCAction> tx = blockChain.MakeTransaction(service.MinerPrivateKey, actions);
+                        Transaction tx = blockChain.MakeTransaction(service.MinerPrivateKey, actions);
                         return tx.Id;
                     }
                     catch (Exception e)
@@ -627,7 +627,7 @@ namespace NineChronicles.Headless.GraphTypes
                         };
 
                         var actions = new NCAction[] { action };
-                        Transaction<NCAction> tx = blockChain.MakeTransaction(service.MinerPrivateKey, actions);
+                        Transaction tx = blockChain.MakeTransaction(service.MinerPrivateKey, actions);
                         return tx.Id;
                     }
                     catch (Exception e)

@@ -43,7 +43,12 @@ namespace NineChronicles.Headless
             services.TryAddSingleton<Libplanet.Explorer.GraphTypes.BencodexValueType>();
             services.TryAddSingleton<Libplanet.Explorer.GraphTypes.FungibleAssetValueType>();
             services.TryAddSingleton<Libplanet.Explorer.GraphTypes.CurrencyType>();
+            services.TryAddSingleton<Libplanet.Explorer.GraphTypes.CurrencyInputType>();
             services.TryAddSingleton<Libplanet.Explorer.GraphTypes.ValidatorType>();
+            services.TryAddSingleton<Libplanet.Explorer.GraphTypes.VoteFlagType>();
+            services.TryAddSingleton<Libplanet.Explorer.GraphTypes.VoteType>();
+            services.TryAddSingleton<Libplanet.Explorer.GraphTypes.BlockCommitType>();
+            services.TryAddSingleton<Libplanet.Explorer.GraphTypes.BoundPeerType>();
 
             return services;
         }
@@ -73,7 +78,6 @@ namespace NineChronicles.Headless
             {
                 Name = "LibplanetStateQuery",
             });
-            services.TryAddSingleton<BlockPolicyType<T>>();
 
             return services;
         }

@@ -73,7 +73,7 @@ namespace NineChronicles.Headless
                             dictionary[MagicOnionTargetKey] = options.Target;
                         }
 
-                        builder.AddInMemoryCollection(dictionary);
+                        builder.AddInMemoryCollection(dictionary!);
                     })
                     .ConfigureKestrel(options =>
                     {
@@ -96,7 +96,7 @@ namespace NineChronicles.Headless
 
             public void ConfigureServices(IServiceCollection services)
             {
-                if (Convert.ToBoolean(Configuration.GetSection("IpRateLimiting")["EnableRateLimiting"]))
+                if (Convert.ToBoolean(Configuration.GetSection("IpRateLimiting")["EnableEndpointRateLimiting"]))
                 {
                     services.AddOptions();
                     services.AddMemoryCache();
@@ -127,8 +127,8 @@ namespace NineChronicles.Headless
                             options.EnableMetrics = true;
                             options.UnhandledExceptionDelegate = context =>
                             {
-                                Console.Error.WriteLine(context.Exception.ToString());
-                                Console.Error.WriteLine(context.ErrorMessage);
+                                Log.Error(context.Exception.ToString());
+                                Log.Error(context.ErrorMessage);
                             };
                         })
                     .AddSystemTextJson()
@@ -170,9 +170,9 @@ namespace NineChronicles.Headless
 
                 app.UseRouting();
                 app.UseAuthorization();
-                if (Convert.ToBoolean(Configuration.GetSection("IpRateLimiting")["EnableRateLimiting"]))
+                if (Convert.ToBoolean(Configuration.GetSection("IpRateLimiting")["EnableEndpointRateLimiting"]))
                 {
-                    app.UseIpRateLimiting();
+                    app.UseMiddleware<CustomRateLimitMiddleware>();
                     app.UseMvc();
                 }
 

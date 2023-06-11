@@ -1,13 +1,16 @@
 using GraphQL;
 using Libplanet;
 using Libplanet.Action;
+using Libplanet.Action.Sys;
 using Libplanet.Assets;
 using Libplanet.Blockchain;
 using Libplanet.Blocks;
+using Libplanet.Consensus;
 using Libplanet.Crypto;
 using Libplanet.KeyStore;
 using Libplanet.Tx;
 using Nekoyume.Action;
+using Nekoyume.BlockChain.Policy;
 using Nekoyume.Model;
 using Nekoyume.Model.State;
 using Nekoyume.TableData;
@@ -17,6 +20,7 @@ using System.Collections.Generic;
 using System.Collections.Immutable;
 using System.IO;
 using System.Linq;
+using System.Numerics;
 using System.Threading.Tasks;
 using Bencodex.Types;
 using GraphQL.Execution;
@@ -26,6 +30,7 @@ using NineChronicles.Headless.Executable.IO;
 using NineChronicles.Headless.Executable.Tests.IO;
 using Xunit;
 using Xunit.Abstractions;
+using static NineChronicles.Headless.NCActionUtils;
 using NCAction = Libplanet.Action.PolymorphicAction<Nekoyume.Action.ActionBase>;
 
 namespace NineChronicles.Headless.Tests.GraphTypes
@@ -112,13 +117,19 @@ namespace NineChronicles.Headless.Tests.GraphTypes
                 ActivationKey.Create(privateKey, nonce);
             NCAction action = new CreatePendingActivation(pendingActivation);
             BlockChain.MakeTransaction(AdminPrivateKey, new[] { action });
-            await BlockChain.MineBlock(AdminPrivateKey);
+            Block block = BlockChain.ProposeBlock(
+                ProposerPrivateKey,
+                lastCommit: GenerateBlockCommit(BlockChain.Tip.Index, BlockChain.Tip.Hash, GenesisValidators));
+            BlockChain.Append(block, GenerateBlockCommit(block.Index, block.Hash, GenesisValidators));
 
             var encodedActivationKey = activationKey.Encode();
             var queryResult = await ExecuteQueryAsync(
                 $"mutation {{ activationStatus {{ activateAccount(encodedActivationKey: \"{encodedActivationKey}\") }} }}");
             var data = (Dictionary<string, object>)((ExecutionNode)queryResult.Data!).ToValue()!;
-            await BlockChain.MineBlock(AdminPrivateKey);
+            block = BlockChain.ProposeBlock(
+                ProposerPrivateKey,
+                lastCommit: GenerateBlockCommit(BlockChain.Tip.Index, BlockChain.Tip.Hash, GenesisValidators));
+            BlockChain.Append(block, GenerateBlockCommit(block.Index, block.Hash, GenesisValidators));
 
             var result =
                 (bool)((Dictionary<string, object>)
@@ -146,8 +157,14 @@ namespace NineChronicles.Headless.Tests.GraphTypes
 
             Address senderAddress = service.MinerPrivateKey!.ToAddress();
             var store = service.Store;
-            await BlockChain.MineBlock(service.MinerPrivateKey);
-            await BlockChain.MineBlock(service.MinerPrivateKey);
+            Block block = BlockChain.ProposeBlock(
+                service.MinerPrivateKey,
+                lastCommit: GenerateBlockCommit(BlockChain.Tip.Index, BlockChain.Tip.Hash, GenesisValidators));
+            BlockChain.Append(block, GenerateBlockCommit(block.Index, block.Hash, GenesisValidators));
+            block = BlockChain.ProposeBlock(
+                service.MinerPrivateKey,
+                lastCommit: GenerateBlockCommit(BlockChain.Tip.Index, BlockChain.Tip.Hash, GenesisValidators));
+            BlockChain.Append(block, GenerateBlockCommit(block.Index, block.Hash, GenesisValidators));
 
             // 10 + 10 (mining rewards)
             Assert.Equal(
@@ -182,13 +199,13 @@ namespace NineChronicles.Headless.Tests.GraphTypes
                 string transferTxIdString = stagedTxIds.Single().ToString();
                 TxId transferTxId = new TxId(ByteUtil.ParseHex(transferTxIdString));
 
-                Transaction<NCAction>? tx = BlockChain.StagePolicy.Get(
+                Transaction? tx = BlockChain.StagePolicy.Get(
                     blockChain: BlockChain,
                     id: transferTxId,
                     filtered: true);
                 Assert.NotNull(tx);
-                Assert.IsType<TransferAsset>(tx!.CustomActions!.Single().InnerAction);
-                TransferAsset transferAsset = (TransferAsset)tx.CustomActions!.Single().InnerAction;
+                Assert.IsType<TransferAsset>(ToAction(tx!.Actions!.Single()).InnerAction);
+                TransferAsset transferAsset = (TransferAsset)ToAction(tx.Actions!.Single()).InnerAction;
                 Assert.Equal(memo, transferAsset.Memo);
 
                 var expectedResult = new Dictionary<string, object>
@@ -198,7 +215,10 @@ namespace NineChronicles.Headless.Tests.GraphTypes
 
                 Assert.Equal(expectedResult, data);
 
-                await BlockChain.MineBlock(recipientKey);
+                block = BlockChain.ProposeBlock(
+                    recipientKey,
+                    lastCommit: GenerateBlockCommit(BlockChain.Tip.Index, BlockChain.Tip.Hash, GenesisValidators));
+                BlockChain.Append(block, GenerateBlockCommit(block.Index, block.Hash, GenesisValidators));
 
                 // 10 + 10 - 17.5(transfer)
                 Assert.Equal(
@@ -225,8 +245,14 @@ namespace NineChronicles.Headless.Tests.GraphTypes
             Address senderAddress = service.MinerPrivateKey!.ToAddress();
 
             var store = service.Store;
-            await BlockChain.MineBlock(service.MinerPrivateKey);
-            await BlockChain.MineBlock(service.MinerPrivateKey);
+            Block block = BlockChain.ProposeBlock(
+                service.MinerPrivateKey,
+                lastCommit: GenerateBlockCommit(BlockChain.Tip.Index, BlockChain.Tip.Hash, GenesisValidators));
+            BlockChain.Append(block, GenerateBlockCommit(block.Index, block.Hash, GenesisValidators));
+            block = BlockChain.ProposeBlock(
+                service.MinerPrivateKey,
+                lastCommit: GenerateBlockCommit(BlockChain.Tip.Index, BlockChain.Tip.Hash, GenesisValidators));
+            BlockChain.Append(block, GenerateBlockCommit(block.Index, block.Hash, GenesisValidators));
 
             // 10 + 10 (mining rewards)
             Assert.Equal(
@@ -250,7 +276,10 @@ namespace NineChronicles.Headless.Tests.GraphTypes
             Assert.Null(result.Errors);
             Assert.Equal(expectedResult, data);
 
-            await BlockChain.MineBlock(recipientKey);
+            block = BlockChain.ProposeBlock(
+                recipientKey,
+                lastCommit: GenerateBlockCommit(BlockChain.Tip.Index, BlockChain.Tip.Hash, GenesisValidators));
+            BlockChain.Append(block, GenerateBlockCommit(block.Index, block.Hash, GenesisValidators));
 
             // 10 + 10 - 17.5(transfer)
             Assert.Equal(
@@ -295,8 +324,8 @@ namespace NineChronicles.Headless.Tests.GraphTypes
                 }
             };
             Assert.Equal(expected, data!);
-            Assert.Single(tx.CustomActions);
-            var action = (CreateAvatar)tx.CustomActions!.First().InnerAction;
+            Assert.Single(tx.Actions);
+            var action = (CreateAvatar)ToAction(tx.Actions!.First()).InnerAction;
             Assert.Equal(name, action.name);
             Assert.Equal(index, action.index);
             Assert.Equal(hair, action.hair);
@@ -388,8 +417,8 @@ namespace NineChronicles.Headless.Tests.GraphTypes
                 }
             };
             Assert.Equal(expected, data);
-            Assert.Single(tx.CustomActions);
-            var action = (HackAndSlash)tx.CustomActions!.First().InnerAction;
+            Assert.Single(tx.Actions);
+            var action = (HackAndSlash)ToAction(tx.Actions!.First()).InnerAction;
             Assert.Equal(avatarAddress, action.AvatarAddress);
             Assert.Equal(worldId, action.WorldId);
             Assert.Equal(stageId, action.StageId);
@@ -474,8 +503,8 @@ namespace NineChronicles.Headless.Tests.GraphTypes
                 }
             };
             Assert.Equal(expected, data);
-            Assert.Single(tx.CustomActions);
-            var action = (DailyReward)tx.CustomActions!.First().InnerAction;
+            Assert.Single(tx.Actions);
+            var action = (DailyReward)ToAction(tx.Actions!.First()).InnerAction;
             Assert.Equal(avatarAddress, action.avatarAddress);
         }
 
@@ -509,8 +538,8 @@ namespace NineChronicles.Headless.Tests.GraphTypes
                 }
             };
             Assert.Equal(expected, data);
-            Assert.Single(tx.CustomActions);
-            var action = (ChargeActionPoint)tx.CustomActions!.First().InnerAction;
+            Assert.Single(tx.Actions);
+            var action = (ChargeActionPoint)ToAction(tx.Actions!.First()).InnerAction;
             Assert.Equal(avatarAddress, action.avatarAddress);
         }
 
@@ -540,8 +569,8 @@ namespace NineChronicles.Headless.Tests.GraphTypes
                 }
             };
             Assert.Equal(expected, data);
-            Assert.Single(tx.CustomActions);
-            var action = (CombinationEquipment)tx.CustomActions!.First().InnerAction;
+            Assert.Single(tx.Actions);
+            var action = (CombinationEquipment)ToAction(tx.Actions!.First()).InnerAction;
             Assert.Equal(avatarAddress, action.avatarAddress);
             Assert.Equal(recipeId, action.recipeId);
             Assert.Equal(slotIndex, action.slotIndex);
@@ -598,8 +627,8 @@ namespace NineChronicles.Headless.Tests.GraphTypes
                 }
             };
             Assert.Equal(expected, data);
-            Assert.Single(tx.CustomActions);
-            var action = (ItemEnhancement)tx.CustomActions!.First().InnerAction;
+            Assert.Single(tx.Actions);
+            var action = (ItemEnhancement)ToAction(tx.Actions!.First()).InnerAction;
             Assert.Equal(avatarAddress, action.avatarAddress);
             Assert.Equal(itemId, action.itemId);
             Assert.Equal(materialId, action.materialId);
@@ -650,8 +679,8 @@ namespace NineChronicles.Headless.Tests.GraphTypes
                 }
             };
             Assert.Equal(expected, data);
-            Assert.Single(tx.CustomActions);
-            var action = (CombinationConsumable)tx.CustomActions!.First().InnerAction;
+            Assert.Single(tx.Actions);
+            var action = (CombinationConsumable)ToAction(tx.Actions!.First()).InnerAction;
             Assert.Equal(avatarAddress, action.avatarAddress);
             Assert.Equal(recipeId, action.recipeId);
             Assert.Equal(slotIndex, action.slotIndex);
@@ -693,7 +722,8 @@ namespace NineChronicles.Headless.Tests.GraphTypes
             };
             var playerPrivateKey = StandaloneContextFx.NineChroniclesNodeService!.MinerPrivateKey!;
             BlockChain.MakeTransaction(playerPrivateKey, new[] { createAvatar });
-            await BlockChain.MineBlock(playerPrivateKey);
+            Block block = BlockChain.ProposeBlock(playerPrivateKey);
+            BlockChain.Append(block, GenerateBlockCommit(block.Index, block.Hash, GenesisValidators));
 
             Assert.NotNull(BlockChain.GetState(playerPrivateKey.ToAddress()));
             var result = await ExecuteQueryAsync(query);
@@ -711,8 +741,8 @@ namespace NineChronicles.Headless.Tests.GraphTypes
                 }
             };
             Assert.Equal(expected, data);
-            Assert.Single(tx.CustomActions);
-            var action = (MonsterCollect)tx.CustomActions!.First().InnerAction;
+            Assert.Single(tx.Actions);
+            var action = (MonsterCollect)ToAction(tx.Actions!.First()).InnerAction;
             Assert.Equal(1, action.level);
         }
 
@@ -737,7 +767,8 @@ namespace NineChronicles.Headless.Tests.GraphTypes
                 name = "avatar",
             };
             BlockChain.MakeTransaction(playerPrivateKey, new[] { createAvatar });
-            await BlockChain.MineBlock(playerPrivateKey);
+            Block block = BlockChain.ProposeBlock(playerPrivateKey);
+            BlockChain.Append(block, GenerateBlockCommit(block.Index, block.Hash, GenesisValidators));
 
             Assert.NotNull(BlockChain.GetState(playerPrivateKey.ToAddress()));
 
@@ -756,8 +787,8 @@ namespace NineChronicles.Headless.Tests.GraphTypes
                 }
             };
             Assert.Equal(expected, data);
-            Assert.Single(tx.CustomActions);
-            var action = (ClaimMonsterCollectionReward)tx.CustomActions!.First().InnerAction;
+            Assert.Single(tx.Actions);
+            var action = (ClaimMonsterCollectionReward)ToAction(tx.Actions!.First()).InnerAction;
             Assert.Equal(avatarAddress, action.avatarAddress);
         }
 
@@ -800,15 +831,15 @@ namespace NineChronicles.Headless.Tests.GraphTypes
         //         }
         //     };
         //     Assert.Equal(expected, result.Data!);
-        //     Assert.Single(tx.CustomActions);
-        //     var action = (CancelMonsterCollect) tx.CustomActions!.First().InnerAction;
+        //     Assert.Single(tx.Actions);
+        //     var action = (CancelMonsterCollect) tx.Actions!.First().InnerAction;
         //     Assert.Equal(1, action.level);
         //     Assert.Equal(0, action.collectRound);
         // }
         [Fact]
         public async Task Tx()
         {
-            Block<PolymorphicAction<ActionBase>> genesis =
+            Block genesis =
                 MakeGenesisBlock(
                     default,
 #pragma warning disable CS0618
@@ -817,7 +848,7 @@ namespace NineChronicles.Headless.Tests.GraphTypes
 #pragma warning restore CS0618
                     ImmutableHashSet<Address>.Empty
                 );
-            NineChroniclesNodeService service = ServiceBuilder.CreateNineChroniclesNodeService(genesis, new PrivateKey());
+            NineChroniclesNodeService service = ServiceBuilder.CreateNineChroniclesNodeService(genesis, ProposerPrivateKey);
 
             StandaloneContextFx.NineChroniclesNodeService = service;
             StandaloneContextFx.BlockChain = service.Swarm?.BlockChain;
@@ -835,14 +866,14 @@ namespace NineChronicles.Headless.Tests.GraphTypes
                 data
             );
 
-            Transaction<PolymorphicAction<ActionBase>> tx =
-                Transaction<PolymorphicAction<ActionBase>>.Create(
+            Transaction tx =
+                Transaction.Create(
                     0,
                     service.MinerPrivateKey!,
                     genesis.Hash,
                     new PolymorphicAction<ActionBase>[] { }
                 );
-            string base64Encoded = Convert.ToBase64String(tx.Serialize(true));
+            string base64Encoded = Convert.ToBase64String(tx.Serialize());
             query = $"mutation {{ stageTx(payload: \"{base64Encoded}\") }}";
             result = await ExecuteQueryAsync(query);
             data = (Dictionary<string, object>)((ExecutionNode)result.Data!).ToValue()!;
@@ -854,15 +885,16 @@ namespace NineChronicles.Headless.Tests.GraphTypes
                 },
                 data
             );
-            Block<PolymorphicAction<ActionBase>> mined =
-                await BlockChain.MineBlock(service.MinerPrivateKey);
+            Block mined =
+                BlockChain.ProposeBlock(service.MinerPrivateKey);
+            BlockChain.Append(mined, GenerateBlockCommit(mined.Index, mined.Hash, GenesisValidators));
             Assert.Contains(tx, mined.Transactions);
         }
 
         [Fact]
         public async Task Tx_V2()
         {
-            Block<PolymorphicAction<ActionBase>> genesis =
+            Block genesis =
                 MakeGenesisBlock(
                     default,
 #pragma warning disable CS0618
@@ -871,7 +903,7 @@ namespace NineChronicles.Headless.Tests.GraphTypes
 #pragma warning restore CS0618
                     ImmutableHashSet<Address>.Empty
                 );
-            NineChroniclesNodeService service = ServiceBuilder.CreateNineChroniclesNodeService(genesis, new PrivateKey());
+            NineChroniclesNodeService service = ServiceBuilder.CreateNineChroniclesNodeService(genesis, ProposerPrivateKey);
 
             StandaloneContextFx.NineChroniclesNodeService = service;
             StandaloneContextFx.BlockChain = service.Swarm?.BlockChain;
@@ -881,14 +913,14 @@ namespace NineChronicles.Headless.Tests.GraphTypes
             ExecutionResult result = await ExecuteQueryAsync(query);
             Assert.NotNull(result.Errors);
             Assert.Null(result.Data!);
-            Transaction<PolymorphicAction<ActionBase>> tx =
-                Transaction<PolymorphicAction<ActionBase>>.Create(
+            Transaction tx =
+                Transaction.Create(
                     0,
                     service.MinerPrivateKey!,
                     genesis.Hash,
                     new PolymorphicAction<ActionBase>[] { }
                 );
-            string base64Encoded = Convert.ToBase64String(tx.Serialize(true));
+            string base64Encoded = Convert.ToBase64String(tx.Serialize());
             query = $"mutation {{ stageTxV2(payload: \"{base64Encoded}\") }}";
             result = await ExecuteQueryAsync(query);
             var data = (Dictionary<string, object>)((ExecutionNode)result.Data!).ToValue()!;
@@ -900,8 +932,9 @@ namespace NineChronicles.Headless.Tests.GraphTypes
                 },
                 data
             );
-            Block<PolymorphicAction<ActionBase>> mined =
-                await BlockChain.MineBlock(service.MinerPrivateKey!);
+            Block mined =
+                BlockChain.ProposeBlock(service.MinerPrivateKey!);
+            BlockChain.Append(mined, GenerateBlockCommit(mined.Index, mined.Hash, GenesisValidators));
             Assert.Contains(tx, mined.Transactions);
         }
 
@@ -914,7 +947,10 @@ namespace NineChronicles.Headless.Tests.GraphTypes
                 ActivationKey.Create(privateKey, nonce);
             NCAction action = new CreatePendingActivation(pendingActivation);
             BlockChain.MakeTransaction(AdminPrivateKey, new[] { action });
-            await BlockChain.MineBlock(AdminPrivateKey);
+            Block block = BlockChain.ProposeBlock(
+                ProposerPrivateKey,
+                lastCommit: GenerateBlockCommit(BlockChain.Tip.Index, BlockChain.Tip.Hash, GenesisValidators));
+            BlockChain.Append(block, GenerateBlockCommit(block.Index, block.Hash, GenesisValidators));
             var encodedActivationKey = activationKey.Encode();
             var actionCommand = new ActionCommand(new StandardConsole());
             var filePath = Path.Combine(Path.GetTempPath(), Path.GetTempFileName());
@@ -928,7 +964,10 @@ namespace NineChronicles.Headless.Tests.GraphTypes
             var queryResult = await ExecuteQueryAsync(
                 $"mutation {{ stageTx(payload: \"{output}\") }}");
             var data = (Dictionary<string, object>)((ExecutionNode)queryResult.Data!).ToValue()!;
-            await BlockChain.MineBlock(AdminPrivateKey);
+            block = BlockChain.ProposeBlock(
+                ProposerPrivateKey,
+                lastCommit: GenerateBlockCommit(BlockChain.Tip.Index, BlockChain.Tip.Hash, GenesisValidators));
+            BlockChain.Append(block, GenerateBlockCommit(block.Index, block.Hash, GenesisValidators));
 
             var result = (bool)data["stageTx"];
             Assert.True(result);
@@ -937,30 +976,40 @@ namespace NineChronicles.Headless.Tests.GraphTypes
             Assert.True((Bencodex.Types.Boolean)state);
         }
 
-        private Block<PolymorphicAction<ActionBase>> MakeGenesisBlock(
+        private Block MakeGenesisBlock(
             Address adminAddress,
             Currency curreny,
             IImmutableSet<Address> activatedAccounts,
             RankingState0? rankingState = null
-        ) => BlockChain<PolymorphicAction<ActionBase>>.MakeGenesisBlock(
-            new PolymorphicAction<ActionBase>[]
-            {
-                new InitializeStates(
-                    rankingState: rankingState ?? new RankingState0(),
-                    shopState: new ShopState(),
-                    gameConfigState: new GameConfigState(_sheets[nameof(GameConfigSheet)]),
-                    redeemCodeState: new RedeemCodeState(Bencodex.Types.Dictionary.Empty
-                        .Add("address", RedeemCodeState.Address.Serialize())
-                        .Add("map", Bencodex.Types.Dictionary.Empty)
+        ) => BlockChain<PolymorphicAction<ActionBase>>.ProposeGenesisBlock(
+            transactions: ImmutableList<Transaction>.Empty.Add(Transaction.Create(0,
+                AdminPrivateKey, null, new PolymorphicAction<ActionBase>[]
+                {
+                    new InitializeStates(
+                        rankingState: rankingState ?? new RankingState0(),
+                        shopState: new ShopState(),
+                        gameConfigState: new GameConfigState(_sheets[nameof(GameConfigSheet)]),
+                        redeemCodeState: new RedeemCodeState(Bencodex.Types.Dictionary.Empty
+                            .Add("address", RedeemCodeState.Address.Serialize())
+                            .Add("map", Bencodex.Types.Dictionary.Empty)
+                        ),
+                        adminAddressState: new AdminState(adminAddress, 1500000),
+                        activatedAccountsState: new ActivatedAccountsState(activatedAccounts),
+                        goldCurrencyState: new GoldCurrencyState(curreny),
+                        goldDistributions: new GoldDistribution[0],
+                        tableSheets: _sheets,
+                        pendingActivationStates: new PendingActivationState[] { }
                     ),
-                    adminAddressState: new AdminState(adminAddress, 1500000),
-                    activatedAccountsState: new ActivatedAccountsState(activatedAccounts),
-                    goldCurrencyState: new GoldCurrencyState(curreny),
-                    goldDistributions: new GoldDistribution[0],
-                    tableSheets: _sheets,
-                    pendingActivationStates: new PendingActivationState[]{ }
-                ),
-            }, blockAction: ServiceBuilder.BlockPolicy.BlockAction
+                })).AddRange(new IAction[]
+            {
+                new Initialize(
+                    new ValidatorSet(
+                        new[] { new Validator(ProposerPrivateKey.PublicKey, BigInteger.One) }
+                            .ToList()),
+                    states: ImmutableDictionary.Create<Address, IValue>())
+            }.Select((sa, nonce) => Transaction.Create(nonce + 1, AdminPrivateKey, null, new[] { sa }))),
+            blockAction: ServiceBuilder.BlockPolicy.BlockAction,
+            privateKey: AdminPrivateKey
         );
     }
 }

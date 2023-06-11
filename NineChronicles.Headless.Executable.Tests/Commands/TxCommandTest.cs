@@ -91,9 +91,9 @@ namespace NineChronicles.Headless.Executable.Tests.Commands
         [Theory]
         [InlineData(null, null)]
         [InlineData(0, null)]
-        [InlineData(ClaimStakeReward.ObsoletedIndex - 1, null)]
-        [InlineData(ClaimStakeReward.ObsoletedIndex, null)]
-        [InlineData(ClaimStakeReward.ObsoletedIndex + 1, null)]
+        [InlineData(ClaimStakeReward2.ObsoletedIndex - 1, null)]
+        [InlineData(ClaimStakeReward2.ObsoletedIndex, null)]
+        [InlineData(ClaimStakeReward2.ObsoletedIndex + 1, null)]
         [InlineData(long.MaxValue, null)]
         [InlineData(null, 1)]
         [InlineData(null, 2)]
@@ -129,7 +129,7 @@ namespace NineChronicles.Headless.Executable.Tests.Commands
                 new[] { filePath });
             var output = _console.Out.ToString();
             var rawTx = Convert.FromBase64String(output!);
-            var tx = Transaction<NCAction>.Deserialize(rawTx);
+            var tx = Transaction.Deserialize(rawTx);
             Assert.Equal(txNonce, tx.Nonce);
             Assert.Equal(_blockHash, tx.GenesisHash);
             Assert.Equal(_privateKey.ToAddress(), tx.Signer);

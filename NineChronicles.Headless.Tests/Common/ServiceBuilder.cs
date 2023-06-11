@@ -22,12 +22,12 @@ namespace NineChronicles.Headless.Tests.Common
             NineChroniclesNodeService.GetTestBlockPolicy();
 
         public static NineChroniclesNodeService CreateNineChroniclesNodeService(
-            Block<PolymorphicAction<ActionBase>> genesis,
+            Block genesis,
             PrivateKey? privateKey = null
         )
         {
             var storePath = Path.Combine(Path.GetTempPath(), Path.GetRandomFileName());
-            var properties = new LibplanetNodeServiceProperties<PolymorphicAction<ActionBase>>
+            var properties = new LibplanetNodeServiceProperties
             {
                 Host = System.Net.IPAddress.Loopback.ToString(),
                 AppProtocolVersion = default,
@@ -35,7 +35,9 @@ namespace NineChronicles.Headless.Tests.Common
                 StorePath = storePath,
                 StoreStatesCacheSize = 2,
                 SwarmPrivateKey = new PrivateKey(),
+                ConsensusPrivateKey = privateKey,
                 Port = null,
+                ConsensusPort = null,
                 NoMiner = true,
                 Render = false,
                 LogActionRenders = false,
@@ -44,7 +46,8 @@ namespace NineChronicles.Headless.Tests.Common
                 MessageTimeout = TimeSpan.FromMinutes(1),
                 TipTimeout = TimeSpan.FromMinutes(1),
                 DemandBuffer = 1150,
-                StaticPeers = ImmutableHashSet<BoundPeer>.Empty,
+                ConsensusSeeds = ImmutableList<BoundPeer>.Empty,
+                ConsensusPeers = ImmutableList<BoundPeer>.Empty,
                 IceServers = ImmutableList<IceServer>.Empty,
             };
             return new NineChroniclesNodeService(
@@ -52,7 +55,7 @@ namespace NineChronicles.Headless.Tests.Common
                 properties,
                 BlockPolicy,
                 NetworkType.Test,
-                StaticActionTypeLoaderSingleton.Instance);
+                StaticActionLoaderSingleton.Instance);
         }
     }
 }

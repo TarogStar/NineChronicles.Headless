@@ -17,6 +17,8 @@ using Serilog;
 using Serilog.Formatting.Compact;
 using System;
 using System.Collections.Concurrent;
+using System.Collections.Generic;
+using System.Collections.Immutable;
 using System.IO;
 using System.Linq;
 using System.Net.Http;
@@ -24,9 +26,11 @@ using System.Reflection;
 using System.Threading;
 using System.Threading.Tasks;
 using Libplanet.Action;
+using Libplanet.Action.Loader;
 // import necessary for sentry exception filters
 using Libplanet.Blocks;
 using Libplanet.Headless;
+using Libplanet.Headless.Hosting;
 using Libplanet.Net.Transports;
 using Nekoyume.Action;
 using OpenTelemetry;
@@ -58,10 +62,6 @@ namespace NineChronicles.Headless.Executable
                     services.AddSingleton<IKeyStore>(Web3KeyStore.DefaultKeyStore);
                 })
                 .RunAsync<Program>(args);
-        }
-
-        static void ConfigureSentryOptions(SentryOptions o)
-        {
         }
 
         [PrimaryCommand]
@@ -183,6 +183,16 @@ namespace NineChronicles.Headless.Executable
             int? txQuotaPerSigner = null,
             [Option(Description = "The maximum number of peers to poll blocks. int.MaxValue by default.")]
             int? maximumPollPeers = null,
+            [Option("consensus-port",
+                Description = "Port used for communicating consensus related messages.  null by default.")]
+            ushort? consensusPort = null,
+            [Option("consensus-private-key",
+                Description = "The private key used for signing consensus messages. " +
+                              "Cannot be null.")]
+            string? consensusPrivateKeyString = null,
+            [Option("consensus-seed",
+                Description = "A list of seed peers to join the block consensus.")]
+            string[]? consensusSeedStrings = null,
             [Option("config", new[] { 'C' },
                 Description = "Absolute path of \"appsettings.json\" file to provide headless configurations.")]
             string? configPath = "appsettings.json",
@@ -209,7 +219,7 @@ namespace NineChronicles.Headless.Executable
             }
             else
             {
-                configurationBuilder.AddJsonFile(configPath)
+                configurationBuilder.AddJsonFile(configPath!)
                     .AddEnvironmentVariables();
             }
 
@@ -217,9 +227,50 @@ namespace NineChronicles.Headless.Executable
             var configuration = configurationBuilder.Build();
             var loggerConf = new LoggerConfiguration()
                 .ReadFrom.Configuration(configuration)
+                .WriteTo.File(
+                    new RenderedCompactJsonFormatter(),
+                    path: Environment.GetEnvironmentVariable("JSON_LOG_PATH") ?? "./logs/remote-headless_9c-network_remote-headless.json",
+                    retainedFileCountLimit: 5,
+                    rollOnFileSizeLimit: true,
+                    fileSizeLimitBytes: 104_857_600)
                 .Destructure.UsingAttributes();
             var headlessConfig = new Configuration();
             configuration.Bind("Headless", headlessConfig);
+
+            IActionEvaluatorConfiguration? GetActionEvaluatorConfiguration(IConfiguration configuration)
+            {
+                if (!(configuration.GetValue<ActionEvaluatorType>("Type") is { } actionEvaluatorType))
+                {
+                    return null;
+                }
+
+                return actionEvaluatorType switch
+                {
+                    ActionEvaluatorType.Default => new DefaultActionEvaluatorConfiguration(),
+                    ActionEvaluatorType.RemoteActionEvaluator => new RemoteActionEvaluatorConfiguration
+                    {
+                        StateServiceEndpoint = configuration.GetValue<string>("StateServiceEndpoint"),
+                    },
+                    ActionEvaluatorType.ForkableActionEvaluator => new ForkableActionEvaluatorConfiguration
+                    {
+                        Pairs = (configuration.GetValue<List<IConfiguration>>("Pairs") ??
+                                 throw new KeyNotFoundException()).Select(pair =>
+                        {
+                            var range = pair.GetValue<ForkableActionEvaluatorRange>("Range") ??
+                                        throw new KeyNotFoundException();
+                            var actionEvaluatorConfiguration =
+                                GetActionEvaluatorConfiguration(configuration.GetSection("ActionEvaluator")) ??
+                                throw new KeyNotFoundException();
+                            return (range, actionEvaluatorConfiguration);
+                        }).ToImmutableArray()
+                    },
+                    _ => throw new InvalidOperationException("Unexpected type."),
+                };
+            }
+
+            var actionEvaluatorConfiguration =
+                GetActionEvaluatorConfiguration(configuration.GetSection("Headless").GetSection("ActionEvaluator"));
+
             headlessConfig.Overwrite(
                 appProtocolVersionToken, trustedAppProtocolVersionSigners, genesisBlockPath, host, port,
                 swarmPrivateKeyString, storeType, storePath, noReduceStore, noMiner, minerCount,
@@ -227,8 +278,9 @@ namespace NineChronicles.Headless.Executable
                 rpcListenPort, rpcRemoteServer, rpcHttpServer, graphQLServer, graphQLHost, graphQLPort,
                 graphQLSecretTokenPath, noCors, nonblockRenderer, nonblockRendererQueue, strictRendering,
                 logActionRenders, confirmations,
-                txLifeTime, messageTimeout, tipTimeout, demandBuffer, staticPeerStrings, skipPreload,
+                txLifeTime, messageTimeout, tipTimeout, demandBuffer, skipPreload,
                 minimumBroadcastTarget, bucketSize, chainTipStaleBehaviorType, txQuotaPerSigner, maximumPollPeers,
+                consensusPort, consensusPrivateKeyString, consensusSeedStrings,
                 sentryDsn, sentryTraceSampleRate
             );
 
@@ -338,12 +390,15 @@ namespace NineChronicles.Headless.Executable
                         messageTimeout: headlessConfig.MessageTimeout,
                         tipTimeout: headlessConfig.TipTimeout,
                         demandBuffer: headlessConfig.DemandBuffer,
-                        staticPeerStrings: headlessConfig.StaticPeerStrings,
                         preload: !headlessConfig.SkipPreload,
                         minimumBroadcastTarget: headlessConfig.MinimumBroadcastTarget,
                         bucketSize: headlessConfig.BucketSize,
                         chainTipStaleBehaviorType: headlessConfig.ChainTipStaleBehaviorType,
-                        maximumPollPeers: headlessConfig.MaximumPollPeers
+                        consensusPort: headlessConfig.ConsensusPort,
+                        consensusPrivateKeyString: headlessConfig.ConsensusPrivateKeyString,
+                        consensusSeedStrings: headlessConfig.ConsensusSeedStrings,
+                        maximumPollPeers: headlessConfig.MaximumPollPeers,
+                        actionEvaluatorConfiguration: actionEvaluatorConfiguration
                     );
 
                 if (headlessConfig.RpcServer)
@@ -357,58 +412,44 @@ namespace NineChronicles.Headless.Executable
                     properties.LogActionRenders = true;
                 }
 
-                IActionTypeLoader MakeStaticActionTypeLoader() => new StaticActionTypeLoader(
-                    Assembly.GetEntryAssembly() is { } entryAssembly
+                IActionLoader MakeSingleActionLoader()
+                {
+                    var actionLoader = new SingleActionLoader(typeof(PolymorphicAction<ActionBase>));
 #if LIB9C_DEV_EXTENSIONS
-                        ? new[]
-                        {
-                            typeof(ActionBase).Assembly,
-                            typeof(Lib9c.DevExtensions.Action.CreateOrReplaceAvatar).Assembly,
-                            entryAssembly
-                        }
-                        : new[]
-                        {
-                            typeof(ActionBase).Assembly,
-                            typeof(Lib9c.DevExtensions.Action.CreateOrReplaceAvatar).Assembly
-                        },
-#else
-                        ? new[] { typeof(ActionBase).Assembly, entryAssembly }
-                        : new[] { typeof(ActionBase).Assembly },
+                    PolymorphicAction<ActionBase>.ReloadLoader(new[] { typeof(ActionBase).Assembly, typeof(Utils).Assembly });
 #endif
-                    typeof(ActionBase)
-                );
+                    return actionLoader;
+                }
 
-                IActionTypeLoader actionTypeLoader;
+                IActionLoader actionLoader;
                 if (headlessConfig.ActionTypeLoader is { } actionTypeLoaderConfiguration)
                 {
                     if (actionTypeLoaderConfiguration.DynamicActionTypeLoader is { } dynamicActionTypeLoaderConf)
                     {
-                        actionTypeLoader = new DynamicActionTypeLoader(
+                        actionLoader = new DynamicActionLoader(
                             dynamicActionTypeLoaderConf.BasePath,
                             dynamicActionTypeLoaderConf.AssemblyFileName,
                             dynamicActionTypeLoaderConf.HardForks.OrderBy(pair => pair.SinceBlockIndex));
                     }
                     else if (actionTypeLoaderConfiguration.StaticActionTypeLoader is { } staticActionTypeLoaderConf)
                     {
-                        var assemblies = staticActionTypeLoaderConf.Assemblies?.Select(x => Assembly.Load(File.ReadAllBytes(x))).ToHashSet()
-                            ?? throw new CommandExitedException(-1);
-                        actionTypeLoader = new StaticActionTypeLoader(assemblies);
+                        throw new NotSupportedException();
                     }
                     else
                     {
-                        actionTypeLoader = MakeStaticActionTypeLoader();
+                        actionLoader = MakeSingleActionLoader();
                     }
                 }
                 else
                 {
-                    actionTypeLoader = MakeStaticActionTypeLoader();
+                    actionLoader = MakeSingleActionLoader();
                 }
 
                 var minerPrivateKey = string.IsNullOrEmpty(headlessConfig.MinerPrivateKeyString)
                     ? null
                     : new PrivateKey(ByteUtil.ParseHex(headlessConfig.MinerPrivateKeyString));
                 TimeSpan minerBlockInterval = TimeSpan.FromMilliseconds(headlessConfig.MinerBlockIntervalMilliseconds);
-                var nineChroniclesProperties = new NineChroniclesNodeServiceProperties(actionTypeLoader)
+                var nineChroniclesProperties = new NineChroniclesNodeServiceProperties(actionLoader)
                 {
                     MinerPrivateKey = minerPrivateKey,
                     Libplanet = properties,
@@ -467,6 +508,10 @@ namespace NineChronicles.Headless.Executable
                 throw;
             }
 #endif
+        }
+
+        static void ConfigureSentryOptions(SentryOptions o)
+        {
         }
     }
 }

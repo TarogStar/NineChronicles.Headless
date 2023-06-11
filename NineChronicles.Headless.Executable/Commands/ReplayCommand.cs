@@ -10,6 +10,7 @@ using Bencodex.Types;
 using Cocona;
 using Cocona.Help;
 using Libplanet.Action;
+using Libplanet.Action.Loader;
 using Libplanet.Blockchain;
 using Libplanet.Blockchain.Policies;
 using Libplanet.Blocks;
@@ -20,6 +21,7 @@ using Nekoyume.BlockChain.Policy;
 using NineChronicles.Headless.Executable.IO;
 using NineChronicles.Headless.Executable.Store;
 using Serilog.Core;
+using static NineChronicles.Headless.NCActionUtils;
 using NCAction = Libplanet.Action.PolymorphicAction<Nekoyume.Action.ActionBase>;
 
 namespace NineChronicles.Headless.Executable.Commands
@@ -90,37 +92,30 @@ namespace NineChronicles.Headless.Executable.Commands
                 IAccountStateDelta previousStates = new AccountStateDeltaImpl(
                     addresses => blockChain.GetStates(
                         addresses,
-                        previousBlock.Hash,
-                        StateCompleters<NCAction>.Reject),
+                        previousBlock.Hash),
                     (address, currency) => blockChain.GetBalance(
                         address,
                         currency,
-                        previousBlock.Hash,
-                        FungibleAssetStateCompleters<NCAction>.Reject),
+                        previousBlock.Hash),
                     currency => blockChain.GetTotalSupply(
                         currency,
-                        previousBlock.Hash,
-                        TotalSupplyStateCompleters<NCAction>.Reject),
+                        previousBlock.Hash),
                     () => blockChain.GetValidatorSet(
-                        previousBlock.Hash,
-                        ValidatorSetStateCompleters<NCAction>.Reject),
+                        previousBlock.Hash),
                     tx.Signer);
-                var actions = tx.SystemAction is { } sa
-                    ? ImmutableList.Create(sa)
-                    : ImmutableList.CreateRange(tx.CustomActions!.Cast<IAction>());
+                var actions = tx.Actions.Select(a => ToAction(a));
                 var actionEvaluations = EvaluateActions(
                     genesisHash: blockChain.Genesis.Hash,
-                    preEvaluationHash: targetBlock.PreEvaluationHash,
+                    preEvaluationHash: targetBlock.PreEvaluationHash.ByteArray,
                     blockIndex: blockIndex,
                     txid: tx.Id,
                     previousStates: previousStates,
                     miner: targetBlock.Miner,
                     signer: tx.Signer,
                     signature: tx.Signature,
-                    actions: actions,
+                    actions: actions.Cast<IAction>().ToImmutableList(),
                     rehearsal: false,
-                    previousBlockStatesTrie: null,
-                    nativeTokenPredicate: _ => true
+                    previousBlockStatesTrie: null
                 );
                 var actionNum = 1;
                 foreach (var actionEvaluation in actionEvaluations)
@@ -201,7 +196,7 @@ namespace NineChronicles.Headless.Executable.Commands
             [Option('s', Description = "An absolute path of block storage.(rocksdb)")]
             string storePath,
             [Option('i', Description = "Target start block height. Tip as default. (Min: 1)")]
-            long startIndex = 1,
+            long? startIndex = null,
             [Option('e', Description = "Target end block height. Tip as default. (Min: 1)" +
                                        "If not set, same as argument \"-i\".")]
             long? endIndex = null,
@@ -218,7 +213,12 @@ namespace NineChronicles.Headless.Executable.Commands
             var disposables = new List<IDisposable?> { outputSw, outputFs };
             try
             {
-                if (startIndex < 1)
+                var (store, stateStore, blockChain) = LoadBlockchain(storePath);
+                disposables.Add(store);
+                disposables.Add(stateStore);
+                startIndex ??= blockChain.Tip.Index;
+
+                if (startIndex is null or < 1)
                 {
                     throw new CommandExitedException(
                         "START-INDEX must be greater than or equal to 1.",
@@ -250,10 +250,7 @@ namespace NineChronicles.Headless.Executable.Commands
                     outputSw?.WriteLine(msg);
                 }
 
-                var (store, stateStore, blockChain) = LoadBlockchain(storePath);
-                disposables.Add(store);
-                disposables.Add(stateStore);
-                var currentBlockIndex = startIndex;
+                var currentBlockIndex = startIndex.Value;
                 while (currentBlockIndex <= endIndex)
                 {
                     var block = blockChain[currentBlockIndex++];
@@ -277,9 +274,8 @@ namespace NineChronicles.Headless.Executable.Commands
 
                         try
                         {
-                            var actionEvaluations = blockChain.ExecuteActions(
-                                block,
-                                StateCompleterSet<NCAction>.Reject);
+                            var rootHash = blockChain.DetermineBlockStateRootHash(block,
+                                out IReadOnlyList<IActionEvaluation> actionEvaluations);
 
                             if (verbose)
                             {
@@ -287,6 +283,14 @@ namespace NineChronicles.Headless.Executable.Commands
                                 _console.Out.WriteLine(msg);
                                 outputSw?.WriteLine(msg);
                                 LoggingActionEvaluations(actionEvaluations, outputSw);
+                            }
+
+                            if (!rootHash.Equals(block.StateRootHash))
+                            {
+                                throw new InvalidBlockStateRootHashException(
+                                    $"Expected {block.StateRootHash} but {rootHash}",
+                                    block.StateRootHash,
+                                    rootHash);
                             }
                         }
                         catch (InvalidBlockStateRootHashException)
@@ -300,13 +304,8 @@ namespace NineChronicles.Headless.Executable.Commands
                             _console.Out.WriteLine(msg);
                             outputSw?.WriteLine(msg);
 
-                            var actionEvaluator = GetActionEvaluator(
-                                blockChain,
-                                stateStore,
-                                blockChain.Genesis.Hash);
-                            var actionEvaluations = actionEvaluator.Evaluate(
-                                block,
-                                StateCompleterSet<NCAction>.Reject);
+                            var actionEvaluator = GetActionEvaluator(blockChain);
+                            var actionEvaluations = actionEvaluator.Evaluate(block);
                             LoggingActionEvaluations(actionEvaluations, outputSw);
 
                             msg = $"- block #{block.Index} evaluating failed with ";
@@ -404,7 +403,7 @@ namespace NineChronicles.Headless.Executable.Commands
             var genesisBlockHash = store.IndexBlockHash(chainId, 0) ??
                                    throw new CommandExitedException(
                                        $"The given blockIndex {0} does not found", -1);
-            var genesisBlock = store.GetBlock<NCAction>(genesisBlockHash);
+            var genesisBlock = store.GetBlock(genesisBlockHash);
 
             // Make BlockChain and blocks.
             var policy = new BlockPolicySource(Logger.None).GetPolicy();
@@ -422,7 +421,7 @@ namespace NineChronicles.Headless.Executable.Commands
                     genesisBlock));
         }
 
-        private Transaction<NCAction> LoadTx(string txPath)
+        private Transaction LoadTx(string txPath)
         {
             using var stream = new FileStream(txPath, FileMode.Open);
             stream.Seek(0, SeekOrigin.Begin);
@@ -445,21 +444,18 @@ namespace NineChronicles.Headless.Executable.Commands
                     -1);
             }
 
-            return new Transaction<NCAction>(txDict);
+            return TxMarshaler.UnmarshalTransaction(txDict);
         }
 
-        private ActionEvaluator<NCAction> GetActionEvaluator(
-            BlockChain<NCAction> blockChain,
-            IStateStore stateStore,
-            BlockHash genesisBlockHash)
+        private ActionEvaluator GetActionEvaluator(BlockChain<NCAction> blockChain)
         {
             var policy = new BlockPolicySource(Logger.None).GetPolicy();
-            return new ActionEvaluator<NCAction>(
+            IActionLoader actionLoader = new SingleActionLoader(typeof(NCAction));
+            return new ActionEvaluator(
                 _ => policy.BlockAction,
                 blockChainStates: blockChain,
-                trieGetter: hash => stateStore.GetStateRoot(blockChain[hash].StateRootHash),
-                genesisHash: genesisBlockHash,
-                nativeTokenPredicate: policy.NativeTokens.Contains);
+                actionTypeLoader: actionLoader,
+                feeCalculator: null);
         }
 
         private void LoggingAboutIncompleteBlockStatesException(
@@ -485,16 +481,43 @@ namespace NineChronicles.Headless.Executable.Commands
         }
 
         private void LoggingActionEvaluations(
-            IReadOnlyList<ActionEvaluation> actionEvaluations,
+            IReadOnlyList<IActionEvaluation> actionEvaluations,
             TextWriter? textWriter)
         {
             var count = actionEvaluations.Count;
             for (var i = 0; i < count; i++)
             {
                 var actionEvaluation = actionEvaluations[i];
-                var actionType = actionEvaluation.Action is NCAction nca
-                    ? ActionTypeAttribute.ValueOf(nca.InnerAction.GetType())
-                    : actionEvaluation.Action.GetType().Name;
+                NCAction? DecodeAction(IValue plainValue)
+                {
+                    try
+                    {
+#pragma warning disable CS0612
+                        var action = new NCAction();
+#pragma warning restore CS0612
+                        action.LoadPlainValue(plainValue);
+                        return action;
+                    }
+                    catch
+                    {
+                        return null;
+                    }
+                }
+
+                string? actionType;
+                if (DecodeAction(actionEvaluation.Action) is { } nca)
+                {
+                    actionType = ActionTypeAttribute.ValueOf(nca.InnerAction.GetType())?.ToString();
+                }
+                else if (actionEvaluation.Action is Dictionary dictionary && dictionary.ContainsKey("type_id"))
+                {
+                    actionType = dictionary["type_id"].ToString();
+                }
+                else
+                {
+                    actionType = actionEvaluation.Action.GetType().Name;
+                }
+
                 var prefix = $"--- action evaluation {i + 1}/{count}:";
                 var msg = prefix +
                           $" tx-id({actionEvaluation.InputContext.TxId})" +

@@ -2,6 +2,7 @@ using System;
 using System.IO;
 using Bencodex;
 using Libplanet;
+using Libplanet.Action.Loader;
 using Libplanet.Blockchain;
 using Libplanet.Blockchain.Policies;
 using Libplanet.Blocks;
@@ -16,6 +17,8 @@ using Serilog.Core;
 using Xunit;
 using NCAction = Libplanet.Action.PolymorphicAction<Nekoyume.Action.ActionBase>;
 using Lib9cUtils = Lib9c.DevExtensions.Utils;
+using Libplanet.Action;
+using Nekoyume.Action;
 
 namespace NineChronicles.Headless.Executable.Tests.Commands
 {
@@ -35,7 +38,7 @@ namespace NineChronicles.Headless.Executable.Tests.Commands
         }
 
         [Theory]
-        // [InlineData(StoreType.Default)]  // Balance() loads loads only RocksDB 
+        // [InlineData(StoreType.Default)]  // Balance() loads loads only RocksDB
         [InlineData(StoreType.RocksDb)]
         public void Balance(StoreType storeType)
         {
@@ -43,22 +46,24 @@ namespace NineChronicles.Headless.Executable.Tests.Commands
             var statesPath = Path.Combine(_storePath, "states");
             Address targetAddress = new PrivateKey().ToAddress();
             int targetCurrency = 10000; // 100 NCG
-            Guid chainId = Guid.NewGuid();
-            store.SetCanonicalChainId(chainId);
-            Block<NCAction> genesisBlock = GenesisHelper.MineGenesisBlock(targetAddress, targetCurrency);
-            store.PutBlock(genesisBlock);
-            store.AppendIndex(chainId, genesisBlock.Hash);
+            Block genesisBlock = GenesisHelper.MineGenesisBlock(targetAddress, targetCurrency);
             var stateKeyValueStore = new RocksDBKeyValueStore(statesPath);
             var stateStore = new TrieStateStore(stateKeyValueStore);
             IStagePolicy<NCAction> stagePolicy = new VolatileStagePolicy<NCAction>();
             IBlockPolicy<NCAction> blockPolicy = new BlockPolicySource(Logger.None).GetPolicy();
-            BlockChain<NCAction> chain = new BlockChain<NCAction>(
+            ActionEvaluator actionEvaluator = new ActionEvaluator(
+                _ => blockPolicy.BlockAction,
+                new BlockChainStates(store, stateStore),
+                new SingleActionLoader(typeof(NCAction)),
+                null);
+            BlockChain<NCAction> chain = BlockChain<NCAction>.Create(
                 blockPolicy,
                 stagePolicy,
                 store,
                 stateStore,
-                genesisBlock);
-            chain.ExecuteActions(chain.Tip);
+                genesisBlock,
+                actionEvaluator);
+            Guid chainId = chain.Id;
             store.Dispose();
             stateStore.Dispose();
 

@@ -1,7 +1,9 @@
 #nullable enable
 using System;
 using System.Collections.Generic;
+using System.Globalization;
 using System.Linq;
+using System.Text;
 using Bencodex;
 using Bencodex.Types;
 using GraphQL;
@@ -10,31 +12,29 @@ using Libplanet;
 using Libplanet.Action;
 using Libplanet.Assets;
 using Libplanet.Blockchain;
+using Libplanet.Blockchain.Renderers;
 using Libplanet.Blocks;
+using Libplanet.Crypto;
 using Libplanet.Explorer.GraphTypes;
-using Microsoft.Extensions.Configuration;
+using Libplanet.Headless;
 using Libplanet.Tx;
+using Microsoft.Extensions.Configuration;
 using Nekoyume;
 using Nekoyume.Action;
+using Nekoyume.Extensions;
+using Nekoyume.Helper;
+using Nekoyume.Model;
+using Nekoyume.Model.Arena;
+using Nekoyume.Model.BattleStatus.Arena;
+using Nekoyume.Model.EnumType;
+using Nekoyume.Model.Item;
 using Nekoyume.Model.State;
 using Nekoyume.TableData;
-using NCAction = Libplanet.Action.PolymorphicAction<Nekoyume.Action.ActionBase>;
-using Libplanet.Blockchain.Renderers;
-using Libplanet.Headless;
-using Nekoyume.Model;
+using Nekoyume.TableData.Crystal;
 using NineChronicles.Headless.GraphTypes.States;
 using Serilog;
-using Nekoyume.Model.Arena;
-using System.Text;
-using Nekoyume.Extensions;
-using Nekoyume.Model.BattleStatus.Arena;
-using Libplanet.Crypto;
-using System.Globalization;
-using Nekoyume.Model.Item;
-using Nekoyume.TableData.Crystal;
-using Nekoyume.Helper;
-using Nekoyume.Model.EnumType;
-
+using static NineChronicles.Headless.NCActionUtils;
+using NCAction = Libplanet.Action.PolymorphicAction<Nekoyume.Action.ActionBase>;
 namespace NineChronicles.Headless.GraphTypes
 {
     public class StandaloneQuery : ObjectGraphType
@@ -54,7 +54,7 @@ namespace NineChronicles.Headless.GraphTypes
                     BlockHash? blockHash = context.GetArgument<byte[]>("hash") switch
                     {
                         byte[] bytes => new BlockHash(bytes),
-                        null => standaloneContext.BlockChain?.GetDelayedRenderer()?.Tip?.Hash,
+                        null => standaloneContext.BlockChain?.Tip?.Hash,
                     };
 
                     if (!(standaloneContext.BlockChain is { } chain))
@@ -127,12 +127,12 @@ namespace NineChronicles.Headless.GraphTypes
 
                     var recipient = context.GetArgument<Address?>("recipient");
 
-                    IEnumerable<Transaction<NCAction>> txs = digest.TxIds
+                    IEnumerable<Transaction> txs = digest.TxIds
                         .Select(b => new TxId(b.ToBuilder().ToArray()))
-                        .Select(store.GetTransaction<NCAction>);
+                        .Select(store.GetTransaction);
                     var filteredTransactions = txs.Where(tx =>
-                        tx.CustomActions!.Count == 1 &&
-                        tx.CustomActions.First().InnerAction is ITransferAsset transferAsset &&
+                        tx.Actions!.Count == 1 &&
+                        ToAction(tx.Actions.First()).InnerAction is ITransferAsset transferAsset &&
                         (!recipient.HasValue || transferAsset.Recipient == recipient) &&
                         transferAsset.Amount.Currency.Ticker == "NCG" &&
                         store.GetTxExecution(blockHash, tx.Id) is TxSuccess);
@@ -157,7 +157,7 @@ namespace NineChronicles.Headless.GraphTypes
 
                     var histories = filteredTransactions.Select(tx =>
                         ToTransferNCGHistory((TxSuccess)store.GetTxExecution(blockHash, tx.Id),
-                            ((ITransferAsset)tx.CustomActions!.Single().InnerAction).Memo));
+                            ((ITransferAsset)ToAction(tx.Actions!.Single()).InnerAction).Memo));
 
                     return histories;
                 });
@@ -318,7 +318,7 @@ namespace NineChronicles.Headless.GraphTypes
                     }
 
 
-                    BlockHash? offset = blockChain.GetDelayedRenderer()?.Tip?.Hash;
+                    BlockHash offset = blockChain.Tip.Hash;
 #pragma warning disable S3247
                     if (blockChain.GetState(agentAddress, offset) is Dictionary agentDict)
 #pragma warning restore S3247
@@ -459,17 +459,17 @@ namespace NineChronicles.Headless.GraphTypes
                     {
                         throw new InvalidOperationException("Store is not ready");
                     }
-                    var transaction = store.GetTransaction<NCAction>(transactionId);
-                    var action = transaction.CustomActions?.FirstOrDefault();
+                    var transaction = store.GetTransaction(transactionId);
+                    var action = transaction.Actions?.FirstOrDefault() as IAction;
                     if (action == null)
                     {
                         throw new InvalidOperationException("Action is null.");
                     }
-                    if (action.InnerAction.GetType() != typeof(ItemEnhancement))
+                    if (action.GetType() != typeof(ItemEnhancement))
                     {
                         throw new InvalidOperationException("Wrong Transaction Type, please choose a BattleArena action");
                     }
-                    var innerAction = action.InnerAction as ItemEnhancement;
+                    var innerAction = action as ItemEnhancement;
                     if (innerAction == null)
                     {
                         throw new InvalidOperationException("Inner action is null");
@@ -504,7 +504,7 @@ namespace NineChronicles.Headless.GraphTypes
                     {
                         hashedSignature = hasher.ComputeHash(transaction.Signature);
                     }
-                    byte[] preEvaluationHashBytes = preEvaluationHash.ToBuilder().ToArray();
+                    byte[] preEvaluationHashBytes = preEvaluationHash.ToByteArray();
                     int seed =
                     (preEvaluationHashBytes.Length > 0
                         ? BitConverter.ToInt32(preEvaluationHashBytes, 0) : 0)
@@ -659,7 +659,7 @@ namespace NineChronicles.Headless.GraphTypes
                     FungibleAssetValue crystal = 0 * CrystalCalculator.CRYSTAL;
                     if (equipmentResult != ItemEnhancement.EnhancementResult.Fail)
                     {
-                        enhancementEquipment.LevelUpV2(random, row, equipmentResult == ItemEnhancement.EnhancementResult.GreatSuccess);
+                        enhancementEquipment.LevelUp(random, row, equipmentResult == ItemEnhancement.EnhancementResult.GreatSuccess);
                     }
                     else
                     {
@@ -725,17 +725,17 @@ namespace NineChronicles.Headless.GraphTypes
                     {
                         throw new InvalidOperationException("Store is not ready");
                     }
-                    var transaction = store.GetTransaction<NCAction>(transactionId);
-                    var action = transaction.CustomActions?.FirstOrDefault();
+                    var transaction = store.GetTransaction(transactionId);
+                    var action = transaction.Actions?.FirstOrDefault() as IAction;
                     if (action == null)
                     {
                         throw new InvalidOperationException("Action is null.");
                     }
-                    if (action.InnerAction.GetType() != typeof(BattleArena))
+                    if (action.GetType() != typeof(BattleArena))
                     {
                         throw new InvalidOperationException("Wrong Transaction Type, please choose a BattleArena action");
                     }
-                    var innerAction = action.InnerAction as BattleArena;
+                    var innerAction = action as BattleArena;
                     if (innerAction == null)
                     {
                         throw new InvalidOperationException("Inner action is null");
@@ -770,7 +770,7 @@ namespace NineChronicles.Headless.GraphTypes
                     {
                         hashedSignature = hasher.ComputeHash(transaction.Signature);
                     }
-                    byte[] preEvaluationHashBytes = preEvaluationHash.ToBuilder().ToArray();
+                    byte[] preEvaluationHashBytes = preEvaluationHash.ToByteArray();
                     int seed =
                     (preEvaluationHashBytes.Length > 0
                         ? BitConverter.ToInt32(preEvaluationHashBytes, 0) : 0)

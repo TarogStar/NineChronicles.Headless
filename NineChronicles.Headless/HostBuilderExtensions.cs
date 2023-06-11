@@ -3,18 +3,15 @@ using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Hosting;
 using NineChronicles.Headless.Properties;
 using System.Net;
-using Grpc.Core;
-using Grpc.Net.Client;
 using Lib9c.Formatters;
 using Libplanet.Action;
 using Libplanet.Headless.Hosting;
-using MagicOnion.Server;
 using MessagePack;
 using MessagePack.Resolvers;
-using Microsoft.AspNetCore.Builder;
 using Microsoft.AspNetCore.Hosting;
 using Microsoft.AspNetCore.Server.Kestrel.Core;
 using Nekoyume.Action;
+using NineChronicles.Headless.Middleware;
 using Sentry;
 
 namespace NineChronicles.Headless
@@ -42,7 +39,7 @@ namespace NineChronicles.Headless
                 services.AddSingleton(provider => service.Store);
                 if (properties.Libplanet is { } libplanetNodeServiceProperties)
                 {
-                    services.AddSingleton<LibplanetNodeServiceProperties<PolymorphicAction<ActionBase>>>(provider => libplanetNodeServiceProperties);
+                    services.AddSingleton<LibplanetNodeServiceProperties>(provider => libplanetNodeServiceProperties);
                 }
                 services.AddSingleton(provider =>
                 {
@@ -77,6 +74,7 @@ namespace NineChronicles.Headless
                     services.AddGrpc(options =>
                     {
                         options.MaxReceiveMessageSize = null;
+                        options.Interceptors.Add<GrpcCaptureMiddleware>();
                     });
                     services.AddMagicOnion();
                     services.AddSingleton(provider =>
