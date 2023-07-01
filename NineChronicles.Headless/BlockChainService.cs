@@ -27,7 +27,6 @@ using Libplanet.Headless;
 using Nekoyume.Model.State;
 using Sentry;
 using static NineChronicles.Headless.NCActionUtils;
-using NCAction = Libplanet.Action.PolymorphicAction<Nekoyume.Action.ActionBase>;
 using NodeExceptionType = Libplanet.Headless.NodeExceptionType;
 using Transaction = Libplanet.Tx.Transaction;
 
@@ -36,8 +35,8 @@ namespace NineChronicles.Headless
     public class BlockChainService : ServiceBase<IBlockChainService>, IBlockChainService
     {
         private static readonly Codec Codec = new Codec();
-        private BlockChain<NCAction> _blockChain;
-        private Swarm<NCAction> _swarm;
+        private BlockChain _blockChain;
+        private Swarm _swarm;
         private RpcContext _context;
         private Codec _codec;
         private LibplanetNodeServiceProperties _libplanetNodeServiceProperties;
@@ -45,8 +44,8 @@ namespace NineChronicles.Headless
         private ConcurrentDictionary<string, Sentry.ITransaction> _sentryTraces;
 
         public BlockChainService(
-            BlockChain<NCAction> blockChain,
-            Swarm<NCAction> swarm,
+            BlockChain blockChain,
+            Swarm swarm,
             RpcContext context,
             LibplanetNodeServiceProperties libplanetNodeServiceProperties,
             ActionEvaluationPublisher actionEvaluationPublisher,
@@ -68,7 +67,9 @@ namespace NineChronicles.Headless
                 Transaction tx =
                     Transaction.Deserialize(txBytes);
 
-                var actionName = ToAction(tx.Actions[0])?.GetInnerActionTypeName() ?? "NoAction";
+                var actionName = ToAction(tx.Actions[0]) is { } action
+                    ? $"{action}"
+                    : "NoAction";
                 var txId = tx.Id.ToString();
                 var sentryTrace = SentrySdk.StartTransaction(
                     actionName,
@@ -82,8 +83,18 @@ namespace NineChronicles.Headless
                 {
                     Log.Debug("PutTransaction: (nonce: {nonce}, id: {id})", tx.Nonce, tx.Id);
                     Log.Debug("StagedTransactions: {txIds}", string.Join(", ", _blockChain.GetStagedTransactionIds()));
-                    _blockChain.StageTransaction(tx);
-                    _swarm.BroadcastTxs(new[] { tx });
+#pragma warning disable CS8632
+                    Exception? validationExc = _blockChain.Policy.ValidateNextBlockTx(_blockChain, tx);
+#pragma warning restore CS8632
+                    if (validationExc is null)
+                    {
+                        _blockChain.StageTransaction(tx);
+                        _swarm.BroadcastTxs(new[] { tx });
+                    }
+                    else
+                    {
+                        Log.Debug("Skip StageTransaction({TxId}) reason: {Msg}", tx.Id, validationExc.Message);
+                    }
 
                     span.Finish();
                     sentryTrace.StartChild(
@@ -110,7 +121,7 @@ namespace NineChronicles.Headless
         {
             var address = new Address(addressBytes);
             var hash = new BlockHash(blockHashBytes);
-            IValue state = _blockChain.GetState(address, hash);
+            IValue state = _blockChain.GetStates(new[] { address }, hash)[0];
             // FIXME: Null과 null 구분해서 반환해야 할 듯
             byte[] encoded = _codec.Encode(state ?? new Null());
             return new UnaryResult<byte[]>(encoded);

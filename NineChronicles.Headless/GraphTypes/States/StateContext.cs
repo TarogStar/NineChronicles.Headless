@@ -5,6 +5,7 @@ using Bencodex.Types;
 using Libplanet;
 using Libplanet.Action;
 using Libplanet.Assets;
+using Libplanet.State;
 
 namespace NineChronicles.Headless.GraphTypes.States
 {
@@ -96,6 +97,8 @@ namespace NineChronicles.Headless.GraphTypes.States
         public IImmutableDictionary<Address, IImmutableSet<Currency>> UpdatedFungibleAssets => throw new System.NotImplementedException();
 
         public IImmutableSet<Currency> TotalSupplyUpdatedCurrencies => throw new System.NotImplementedException();
+
+        public IImmutableDictionary<Address, IImmutableSet<Currency>> TotalUpdatedFungibleAssets => throw new System.NotImplementedException();
 
         public IValue? GetState(Address address) =>
             AccountStateGetter(new[] { address })[0];
