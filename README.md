@@ -10,7 +10,7 @@
   * [Format](#format)
 - [How to run NineChronicles Headless on AWS EC2 instance using Docker](#how-to-run-ninechronicles-headless-on-aws-ec2-instance-using-docker)
   * [On Your AWS EC2 Instance](#on-your-aws-ec2-instance)
-  * [Building Your Own Docker Image from Your Local Machine](#building-your-own-docker-image-from-your-local-machine)
+  * [Building Your Own Docker Image from Yousr Local Machine](#building-your-own-docker-image-from-your-local-machine)
 - [Nine Chronicles GraphQL API Documentation](#nine-chronicles-graphql-api-documentation)
 - [Create A New Genesis Block](#create-a-new-genesis-block)
 
