@@ -82,7 +82,7 @@ public partial class ActionQuery
                         actionPoint = actionPoint,
                         apStoneCount = apStoneCount,
                     };
-                    return Encode(context, action);
+                    return Codec.Encode(action.PlainValue);
                 }
                 catch (Exception e)
                 {

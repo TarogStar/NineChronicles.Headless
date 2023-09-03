@@ -33,7 +33,7 @@ public partial class ActionQuery
                     avatarAddress = avatarAddress,
                     slotIndex = slotIndex
                 };
-                return Encode(context, action);
+                return Codec.Encode(action.PlainValue);
             });
     }
 }

@@ -61,7 +61,7 @@ public partial class ActionQuery
                     payByCrystal = payByCrystal,
                     useHammerPoint = useHammerPoint
                 };
-                return Encode(context, action);
+                return Codec.Encode(action.PlainValue);
             }
         );
     }

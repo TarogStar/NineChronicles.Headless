@@ -40,7 +40,7 @@ public partial class ActionQuery
                     slotIndex = slotIndex,
                     recipeId = recipeId,
                 };
-                return Encode(context, action);
+                return Codec.Encode(action.PlainValue);
             }
         );
     }

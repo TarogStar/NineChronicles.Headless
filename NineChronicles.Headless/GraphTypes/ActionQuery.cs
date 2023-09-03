@@ -14,6 +14,9 @@ using Nekoyume.Action.Factory;
 using Nekoyume.Model;
 using Nekoyume.Model.State;
 using Nekoyume.TableData;
+using System.Collections.Immutable;
+using Nekoyume.Model.Market;
+using Nekoyume.Model.Item;
 
 namespace NineChronicles.Headless.GraphTypes
 {
@@ -337,6 +340,26 @@ namespace NineChronicles.Headless.GraphTypes
                 }
             );
             Field<NonNullGraphType<ByteStringType>>(
+                "chargeAp",
+                arguments: new QueryArguments(
+                    new QueryArgument<NonNullGraphType<AddressType>>
+                    {
+                        Name = "avatarAddress",
+                        Description = "address of avatar state to receive reward."
+                    }
+                ),
+                resolve: context =>
+                {
+                    var avatarAddress = context.GetArgument<Address>("avatarAddress");
+
+                    ActionBase action = new ChargeActionPoint()
+                    {
+                        avatarAddress = avatarAddress,
+                    };
+                    return Encode(context, action);
+                }
+            );
+            Field<NonNullGraphType<ByteStringType>>(
                 "prepareRewardAssets",
                 arguments: new QueryArguments(
                     new QueryArgument<NonNullGraphType<AddressType>>
@@ -528,10 +551,243 @@ namespace NineChronicles.Headless.GraphTypes
                     {
                         AvatarAddress = avatarAddress,
                         RuneId = runeId,
-                        TryCount = tryCount
+                        TryCount = tryCount,
                     };
                     return Encode(context, action);
                 });
+
+            Field<NonNullGraphType<ByteStringType>>(
+                "gachaBuffRoll",
+                arguments: new QueryArguments(
+                    new QueryArgument<NonNullGraphType<AddressType>>
+                    {
+                        Name = "avatarAddress",
+                        Description = "The avatar address to enhance rune."
+                    },
+                    new QueryArgument<NonNullGraphType<BooleanGraphType>>
+                    {
+                        Name = "advancedRoll",
+                        Description = "Rune ID to enhance."
+                    }),
+                resolve: context =>
+                {
+                    var avatarAddress = context.GetArgument<Address>("avatarAddress");
+                    var advancedRoll = context.GetArgument<bool>("advancedRoll");
+
+                    ActionBase action = new HackAndSlashRandomBuff
+                    {
+                        AvatarAddress = avatarAddress,
+                        AdvancedGacha= advancedRoll,
+                    };
+                    return Encode(context, action);
+                });
+            Field<NonNullGraphType<ByteStringType>>(
+                "registerProduct",
+                arguments: new QueryArguments(
+                    new QueryArgument<NonNullGraphType<AddressType>>
+                    {
+                        Name = "avatarAddress",
+                        Description = "The avatar address to enhance rune."
+                    },
+                    new QueryArgument<NonNullGraphType<IntGraphType>>
+                    {
+                        Name = "price",
+                        Description = "GUID in string of item"
+                    },
+                    new QueryArgument<NonNullGraphType<StringGraphType>>
+                    {
+                        Name = "itemId",
+                        Description = "GUID in string of item"
+                    }),
+                resolve: context =>
+                {
+                    var avatarAddress = context.GetArgument<Address>("avatarAddress");
+                    var itemId = context.GetArgument<string>("itemId");
+                    var price = context.GetArgument<int>("price");
+
+                    RegisterInfo RegisterInfos = new RegisterInfo();
+                    RegisterInfos.AvatarAddress = avatarAddress;
+#pragma warning disable CS0618 // Type or member is obsolete
+                    Currency NCG =
+                    Currency.Legacy(
+                        "NCG",
+                        2,
+                        ImmutableHashSet.Create(new Address("0x47D082a115c63E7b58B1532d20E631538eaFADde"))
+                    );
+#pragma warning restore CS0618 // Type or member is obsolete
+                    RegisterInfos.Price = FungibleAssetValue.Parse(NCG, price.ToString());
+                    RegisterInfos.Type = Nekoyume.Model.Market.ProductType.NonFungible;
+                    RegisterInfos.TradableId = Guid.Parse(itemId);
+                    RegisterInfos.ItemCount = 1;
+
+                    List<IRegisterInfo> holds = new List<IRegisterInfo>();
+                    holds.Add(RegisterInfos);
+
+                    ActionBase action = new RegisterProduct
+                    {
+                        AvatarAddress = avatarAddress,
+                        RegisterInfos = holds,
+                        ChargeAp = true,
+                    };
+                    return Encode(context, action);
+                }
+            );
+            Field<NonNullGraphType<ByteStringType>>(
+                "buyProduct",
+                arguments: new QueryArguments(
+                    new QueryArgument<NonNullGraphType<AddressType>>
+                    {
+                        Name = "avatarAddress",
+                        Description = "The avatar address to enhance rune."
+                    },
+                    new QueryArgument<NonNullGraphType<StringGraphType>>
+                    {
+                        Name = "itemId",
+                        Description = "GUID in string of item"
+                    },
+                    new QueryArgument<NonNullGraphType<StringGraphType>>
+                    {
+                        Name = "productId",
+                        Description = "GUID in string of item"
+                    },
+                    new QueryArgument<NonNullGraphType<AddressType>>
+                    {
+                        Name = "sellAvatarAddress",
+                        Description = "The avatar address to enhance rune."
+                    },
+                    new QueryArgument<NonNullGraphType<IntGraphType>>
+                    {
+                        Name = "price",
+                        Description = "The avatar address to enhance rune."
+                    },
+                    new QueryArgument<NonNullGraphType<IntGraphType>>
+                    {
+                        Name = "subType",
+                        Description = "The avatar address to enhance rune."
+                    },
+                    new QueryArgument<NonNullGraphType<AddressType>>
+                    {
+                        Name = "sellAgentAddress",
+                        Description = "The avatar address to enhance rune."
+                    }),
+                resolve: context =>
+                {
+                    var avatarAddress = context.GetArgument<Address>("avatarAddress");
+                    var itemId = context.GetArgument<string>("itemId");
+                    var productId = context.GetArgument<string>("productId");
+                    var price = context.GetArgument<int>("price");
+                    var subType = context.GetArgument<int>("subType");
+                    var sellAvatarAddress = context.GetArgument<Address>("sellAvatarAddress");
+                    var sellAgentAddress = context.GetArgument<Address>("sellAgentAddress");
+
+                    ItemProductInfo itemProductInfo = new ItemProductInfo();
+                    itemProductInfo.AvatarAddress = avatarAddress;
+#pragma warning disable CS0618 // Type or member is obsolete
+                    Currency NCG =
+                    Currency.Legacy(
+                        "NCG",
+                        2,
+                        ImmutableHashSet.Create(new Address("0x47D082a115c63E7b58B1532d20E631538eaFADde"))
+                    );
+#pragma warning restore CS0618 // Type or member is obsolete
+                    itemProductInfo.Price = FungibleAssetValue.Parse(NCG, price.ToString());
+                    itemProductInfo.Type = Nekoyume.Model.Market.ProductType.NonFungible;
+                    itemProductInfo.TradableId = Guid.Parse(itemId);
+                    itemProductInfo.ProductId = Guid.Parse(productId);
+                    itemProductInfo.AgentAddress = sellAgentAddress;
+                    itemProductInfo.AvatarAddress = sellAvatarAddress;
+                    itemProductInfo.ItemSubType = ItemSubType.Weapon;
+
+                    switch (subType)
+                    {
+                        case 6:
+                            itemProductInfo.ItemSubType = ItemSubType.Weapon; break;
+                        case 7:
+                            itemProductInfo.ItemSubType = ItemSubType.Armor; break;
+                        case 8:
+                            itemProductInfo.ItemSubType = ItemSubType.Belt; break;
+                        case 9:
+                            itemProductInfo.ItemSubType = ItemSubType.Necklace; break;
+                        case 10:
+                            itemProductInfo.ItemSubType = ItemSubType.Ring; break;
+                    }
+
+                    List<IProductInfo> holds = new List<IProductInfo>();
+                    holds.Add(itemProductInfo);
+
+                    ActionBase action = new BuyProduct
+                    {
+                        AvatarAddress = avatarAddress,
+                        ProductInfos = holds,
+                    };
+                    return Encode(context, action);
+                }
+            );
+            Field<NonNullGraphType<ByteStringType>>(
+                name: "BattleArena",
+                arguments: new QueryArguments(
+                    new QueryArgument<NonNullGraphType<AddressType>>
+                    {
+                        Name = "avatarAddress",
+                        Description = "Avatar address."
+                    },
+                    new QueryArgument<NonNullGraphType<AddressType>>
+                    {
+                        Name = "enemyAvatarAddress",
+                        Description = "Enemy Avatar address."
+                    },
+                    new QueryArgument<NonNullGraphType<IntGraphType>>
+                    {
+                        Name = "championshipId",
+                        Description = "Championship ID."
+                    },
+                    new QueryArgument<NonNullGraphType<IntGraphType>>
+                    {
+                        Name = "roundId",
+                        Description = "round ID."
+                    },
+                    new QueryArgument<NonNullGraphType<IntGraphType>>
+                    {
+                        Name = "ticketAmount",
+                        Description = "round ID."
+                    },
+                    new QueryArgument<ListGraphType<GuidGraphType>>
+                    {
+                        Name = "equipmentIds",
+                        Description = "List of equipment id for equip."
+                    },
+                    new QueryArgument<ListGraphType<GuidGraphType>>
+                    {
+                        Name = "costumeIds",
+                        Description = "List of costume id for equip."
+                    }
+                ),
+                resolve: context =>
+                {
+                    Address myAvatarAddress = context.GetArgument<Address>("avatarAddress");
+                    Address enemyAvatarAddress = context.GetArgument<Address>("enemyAvatarAddress");
+                    int championshipId = context.GetArgument<int>("championshipId");
+                    int roundId = context.GetArgument<int>("roundId");
+                    List<Guid> costumeIds = context.GetArgument<List<Guid>>("costumeIds") ?? new List<Guid>();
+                    List<Guid> equipmentIds = context.GetArgument<List<Guid>>("equipmentIds") ?? new List<Guid>();
+                    int ticketAmount = context.GetArgument<int>("ticketAmount");
+                    List<RuneSlotInfo> runes = new List<RuneSlotInfo>();
+
+                    ActionBase action = new BattleArena
+                    {
+                        myAvatarAddress = myAvatarAddress,
+                        enemyAvatarAddress = enemyAvatarAddress,
+                        championshipId = championshipId,
+                        costumes = costumeIds,
+                        equipments = equipmentIds,
+                        round = roundId,
+                        ticket = ticketAmount,
+                        runeInfos = runes
+                    };                  
+
+                    return Codec.Encode(action.PlainValue);
+                }
+            );
 
             RegisterHackAndSlash();
             RegisterHackAndSlashSweep();

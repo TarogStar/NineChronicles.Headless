@@ -87,7 +87,7 @@ public partial class ActionQuery
                         RuneInfos = runeSlotInfos,
                         StageBuffId = stageBuffId
                     };
-                    return Encode(context, action);
+                    return Codec.Encode(action.PlainValue);
                 }
                 catch (Exception e)
                 {
