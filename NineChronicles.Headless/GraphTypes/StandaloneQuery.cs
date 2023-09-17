@@ -7,6 +7,7 @@ using Bencodex.Types;
 using GraphQL;
 using GraphQL.Types;
 using Lib9c;
+using Libplanet.Action;
 using Libplanet.Blockchain;
 using Libplanet.Common;
 using Libplanet.Crypto;
@@ -17,9 +18,11 @@ using Libplanet.Types.Tx;
 using Microsoft.Extensions.Configuration;
 using Nekoyume;
 using Nekoyume.Action;
+using Nekoyume.Extensions;
+using Nekoyume.Model;
+using Nekoyume.Model.EnumType;
 using Nekoyume.Model.State;
 using Nekoyume.TableData;
-using Nekoyume.Model;
 using NineChronicles.Headless.GraphTypes.States;
 using static NineChronicles.Headless.NCActionUtils;
 using Transaction = Libplanet.Types.Tx.Transaction;
@@ -89,6 +92,183 @@ namespace NineChronicles.Headless.GraphTypes
                             null => chain.Tip!.Index,
                         }
                     );
+                }
+            );
+
+            Field<ListGraphType<Abstractions.ArenaEventBaseType>>(
+                "arenaBattleData",
+                description: "All of the information to playback an arena battle.",
+                arguments: new QueryArguments(new QueryArgument<NonNullGraphType<TxIdType>>
+                {
+                    Name = "transactionId",
+                    Description = "Transaction of the battle."
+                }),
+                resolve: context =>
+                {
+                    var transactionId = context.GetArgument<TxId>("transactionId");
+
+                    if (!(standaloneContext.Store is { } store))
+                    {
+                        throw new InvalidOperationException("Store is not ready");
+                    }
+                    var transaction = store.GetTransaction(transactionId);
+                    var action = transaction.Actions?.FirstOrDefault() as IAction;
+                    if (action == null)
+                    {
+                        throw new InvalidOperationException("Action is null.");
+                    }
+                    if (action.GetType() != typeof(BattleArena))
+                    {
+                        throw new InvalidOperationException("Wrong Transaction Type, please choose a BattleArena action");
+                    }
+                    var innerAction = action as BattleArena;
+                    if (innerAction == null)
+                    {
+                        throw new InvalidOperationException("Inner action is null");
+                    }
+                    var blockHash = store.GetFirstTxIdBlockHashIndex(transactionId);
+
+                    if (blockHash == null)
+                    {
+                        throw new InvalidOperationException("Block Hash is null");
+                    }
+                    var digest = store.GetBlockDigest(blockHash.Value);
+                    if (digest == null)
+                    {
+                        throw new InvalidOperationException("Block Digest is null.");
+                    }
+                    if (!(standaloneContext.BlockChain is { } chain))
+                    {
+                        return null;
+                    }
+                    var header = digest.Value.GetHeader();
+                    if (header == null)
+                    {
+                        throw new InvalidOperationException("Block Header is null.");
+                    }
+                    var preEvaluationHash = header.PreEvaluationHash;
+                    if (transaction.Signature == null)
+                    {
+                        throw new InvalidOperationException("Transaction Signature is null.");
+                    }
+                    byte[] hashedSignature;
+                    using (var hasher = System.Security.Cryptography.SHA1.Create())
+                    {
+                        hashedSignature = hasher.ComputeHash(transaction.Signature);
+                    }
+                    byte[] preEvaluationHashBytes = preEvaluationHash.ToByteArray();
+                    int seed =
+                    (preEvaluationHashBytes.Length > 0
+                        ? BitConverter.ToInt32(preEvaluationHashBytes, 0) : 0)
+                    ^ BitConverter.ToInt32(hashedSignature, 0);
+
+                    var random = new LocalRandom(seed);
+                    var simulator = new Nekoyume.Arena.ArenaSimulator(random);
+
+                    var previousHash = header.PreviousHash;
+                    if (!(previousHash is BlockHash))
+                    {
+                        throw new InvalidOperationException("Previous BlockHash missing.");
+                    }
+                    var states = new StateContext(
+                        chain.ToAccountBalanceGetter(previousHash),
+                        chain[previousHash.Value].Index
+                    );
+
+                    var sheets = states.GetSheets(
+                        containArenaSimulatorSheets: true,
+                        sheetTypes: new[]
+                        {
+                            typeof(ArenaSheet),
+                            typeof(ItemRequirementSheet),
+                            typeof(EquipmentItemRecipeSheet),
+                            typeof(EquipmentItemSubRecipeSheetV2),
+                            typeof(EquipmentItemOptionSheet),
+                            typeof(MaterialItemSheet),
+                        });
+                    var myAvatarAddress = innerAction.myAvatarAddress;
+                    if (!states.TryGetAvatarStateV2(transaction.Signer, myAvatarAddress,
+                    out var avatarState, out var _))
+                    {
+                        throw new FailedLoadStateException(
+                            $"Aborted as the avatar state of the signer was failed to load.");
+                    }
+                    var myArenaAvatarStateAdr = ArenaAvatarState.DeriveAddress(myAvatarAddress);
+                    var enemyAvatarAddress = innerAction.enemyAvatarAddress;
+
+                    if (!states.TryGetArenaAvatarState(myArenaAvatarStateAdr, out var myArenaAvatarState))
+                    {
+                        throw new Exception(
+                            $"[{nameof(BattleArena)}] my avatar address : {myAvatarAddress}");
+                    }
+
+                    var enemyArenaAvatarStateAdr = ArenaAvatarState.DeriveAddress(enemyAvatarAddress);
+                    if (!states.TryGetArenaAvatarState(enemyArenaAvatarStateAdr,
+                            out var enemyArenaAvatarState))
+                    {
+                        throw new Exception(
+                            $"[{nameof(BattleArena)}] enemy avatar address : {enemyAvatarAddress}");
+                    }
+
+                    // update arena avatar state
+                    myArenaAvatarState.UpdateEquipment(innerAction.equipments);
+                    myArenaAvatarState.UpdateCostumes(innerAction.costumes);
+
+                    var ItemSlotStateAddress = ItemSlotState.DeriveAddress(myAvatarAddress, BattleType.Arena);
+                    var myItemSlotState = states.TryGetState(ItemSlotStateAddress, out List rawItemSlotState)
+                        ? new ItemSlotState(rawItemSlotState)
+                        : new ItemSlotState(BattleType.Arena);
+                    var AvatarState = states.GetAvatarState(myAvatarAddress);
+                    var RuneSlotStateAddress = RuneSlotState.DeriveAddress(myAvatarAddress, BattleType.Arena);
+                    var myRuneSlotState = states.TryGetState(RuneSlotStateAddress, out List RawRuneSlotState)
+                        ? new RuneSlotState(RawRuneSlotState)
+                        : new RuneSlotState(BattleType.Arena);
+
+                    var runeStates = new List<RuneState>();
+                    var RuneSlotInfos = myRuneSlotState.GetEquippedRuneSlotInfos();
+                    foreach (var address in RuneSlotInfos.Select(info => RuneState.DeriveAddress(myAvatarAddress, info.RuneId)))
+                    {
+                        if (states.TryGetState(address, out List rawRuneState))
+                        {
+                            runeStates.Add(new RuneState(rawRuneState));
+                        }
+                    }
+
+                    // simulate
+                    // get enemy equipped items
+                    var enemyItemSlotStateAddress = ItemSlotState.DeriveAddress(enemyAvatarAddress, BattleType.Arena);
+                    var enemyItemSlotState = states.TryGetState(enemyItemSlotStateAddress, out List rawEnemyItemSlotState)
+                        ? new ItemSlotState(rawEnemyItemSlotState)
+                        : new ItemSlotState(BattleType.Arena);
+                    var enemyAvatarState = states.GetEnemyAvatarState(enemyAvatarAddress);
+                    var enemyRuneSlotStateAddress = RuneSlotState.DeriveAddress(enemyAvatarAddress, BattleType.Arena);
+                    var enemyRuneSlotState = states.TryGetState(enemyRuneSlotStateAddress, out List enemyRawRuneSlotState)
+                        ? new RuneSlotState(enemyRawRuneSlotState)
+                        : new RuneSlotState(BattleType.Arena);
+
+                    var enemyRuneStates = new List<RuneState>();
+                    var enemyRuneSlotInfos = enemyRuneSlotState.GetEquippedRuneSlotInfos();
+                    foreach (var address in enemyRuneSlotInfos.Select(info => RuneState.DeriveAddress(myAvatarAddress, info.RuneId)))
+                    {
+                        if (states.TryGetState(address, out List rawRuneState))
+                        {
+                            enemyRuneStates.Add(new RuneState(rawRuneState));
+                        }
+                    }
+
+                    ArenaPlayerDigest ExtraMyArenaPlayerDigest = new ArenaPlayerDigest(avatarState, 
+                        myItemSlotState.Equipments, 
+                        myItemSlotState.Costumes,
+                        runeStates);
+                    ArenaPlayerDigest ExtraEnemyArenaPlayerDigest = new ArenaPlayerDigest(
+                        enemyAvatarState,
+                        enemyItemSlotState.Equipments,
+                        enemyItemSlotState.Costumes,
+                        enemyRuneStates);
+                    var arenaSheets = sheets.GetArenaSimulatorSheets();
+                    var log = simulator.Simulate(ExtraMyArenaPlayerDigest, ExtraEnemyArenaPlayerDigest, arenaSheets);
+                    return log.Events;
+
                 }
             );
 
