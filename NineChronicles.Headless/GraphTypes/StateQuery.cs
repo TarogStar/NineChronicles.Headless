@@ -18,10 +18,12 @@ using Nekoyume.Model;
 using Nekoyume.Model.Arena;
 using Nekoyume.Model.EnumType;
 using Nekoyume.Model.Item;
+using Nekoyume.Model.Stake;
 using Nekoyume.Model.Skill;
 using Nekoyume.Model.State;
 using Nekoyume.TableData;
 using Nekoyume.TableData.Crystal;
+using Nekoyume.TableData.Stake;
 using NineChronicles.Headless.GraphTypes.Abstractions;
 using NineChronicles.Headless.GraphTypes.States;
 using NineChronicles.Headless.GraphTypes.States.Models;
@@ -245,12 +247,14 @@ namespace NineChronicles.Headless.GraphTypes
 
             StakeStateType.StakeStateContext? GetStakeState(StateContext ctx, Address agentAddress)
             {
-                if (ctx.GetState(StakeState.DeriveAddress(agentAddress)) is Dictionary state)
+                var stakeStateAddress = StakeState.DeriveAddress(agentAddress);
+                if (ctx.BlockIndex.HasValue && ctx.AccountState.TryGetStakeStateV2(agentAddr: agentAddress, out StakeStateV2 stakeStateV2))
                 {
                     return new StakeStateType.StakeStateContext(
-                        new StakeState(state),
+                        stakeStateV2,
+                        stakeStateAddress,
                         ctx.AccountState,
-                        ctx.BlockIndex
+                        ctx.BlockIndex.Value
                     );
                 }
 
@@ -258,7 +262,7 @@ namespace NineChronicles.Headless.GraphTypes
             }
 
             Field<StakeStateType>(
-                name: nameof(StakeState),
+                name: "stakeState",
                 description: "State for staking.",
                 arguments: new QueryArguments(new QueryArgument<NonNullGraphType<AddressType>>
                 {
@@ -345,7 +349,41 @@ namespace NineChronicles.Headless.GraphTypes
             );
 
             Field<StakeRewardsType>(
+                "latestStakeRewards",
+                description: "The latest stake rewards based on StakePolicySheet.",
+                resolve: context =>
+                {
+                    var stakePolicySheetStateValue = context.Source.GetState(Addresses.GetSheetAddress<StakePolicySheet>());
+                    var stakePolicySheet = new StakePolicySheet();
+                    if (stakePolicySheetStateValue is not Text stakePolicySheetStateText)
+                    {
+                        return null;
+                    }
+
+                    stakePolicySheet.Set(stakePolicySheetStateText);
+
+                    IReadOnlyList<IValue?> values = context.Source.GetStates(new[]
+                    {
+                        Addresses.GetSheetAddress(stakePolicySheet["StakeRegularFixedRewardSheet"].Value),
+                        Addresses.GetSheetAddress(stakePolicySheet["StakeRegularRewardSheet"].Value),
+                    });
+
+                    if (!(values[0] is Text fsv && values[1] is Text sv))
+                    {
+                        return null;
+                    }
+
+                    var stakeRegularFixedRewardSheet = new StakeRegularFixedRewardSheet();
+                    var stakeRegularRewardSheet = new StakeRegularRewardSheet();
+                    stakeRegularFixedRewardSheet.Set(fsv);
+                    stakeRegularRewardSheet.Set(sv);
+
+                    return (stakeRegularRewardSheet, stakeRegularFixedRewardSheet);
+                }
+            );
+            Field<StakeRewardsType>(
                 "stakeRewards",
+                deprecationReason: "Since stake3, claim_stake_reward9 actions, each stakers have their own contracts.",
                 resolve: context =>
                 {
                     StakeRegularRewardSheet stakeRegularRewardSheet;
@@ -354,9 +392,9 @@ namespace NineChronicles.Headless.GraphTypes
                     if (context.Source.BlockIndex < StakeState.StakeRewardSheetV2Index)
                     {
                         stakeRegularRewardSheet = new StakeRegularRewardSheet();
-                        stakeRegularRewardSheet.Set(ClaimStakeReward.V1.StakeRegularRewardSheetCsv);
+                        stakeRegularRewardSheet.Set(ClaimStakeReward8.V1.StakeRegularRewardSheetCsv);
                         stakeRegularFixedRewardSheet = new StakeRegularFixedRewardSheet();
-                        stakeRegularFixedRewardSheet.Set(ClaimStakeReward.V1.StakeRegularFixedRewardSheetCsv);
+                        stakeRegularFixedRewardSheet.Set(ClaimStakeReward8.V1.StakeRegularFixedRewardSheetCsv);
                     }
                     else
                     {
@@ -564,7 +602,7 @@ namespace NineChronicles.Headless.GraphTypes
                     try {
                         var championshipId = context.GetArgument<int>("championshipid");
                         var round = context.GetArgument<int>("round");
-                        var sheets = context.Source.GetSheets(sheetTypes: new[]
+                        var sheets = AccountStateExtensions.GetSheets(context.Source.AccountState, sheetTypes: new[]
                         {
                             typeof(ArenaSheet),
                             typeof(CharacterSheet),
@@ -586,7 +624,7 @@ namespace NineChronicles.Headless.GraphTypes
 
                         var arenaParticipantsAdr =
                             ArenaParticipants.DeriveAddress(roundData.ChampionshipId, roundData.Round);
-                        if (!context.Source.TryGetArenaParticipants(arenaParticipantsAdr, out var arenaParticipants))
+                        if (!AccountStateExtensions.TryGetArenaParticipants(context.Source.AccountState, arenaParticipantsAdr, out var arenaParticipants))
                         {
                             throw new ArenaParticipantsNotFoundException(
                                 $"[{nameof(BattleArena)}] ChampionshipId({roundData.ChampionshipId}) - round({roundData.Round})");
@@ -596,7 +634,7 @@ namespace NineChronicles.Headless.GraphTypes
                         championshipInfo.EndIndex = roundData.EndBlockIndex;
                         championshipInfo.Address = arenaParticipantsAdr;
                         List<ChampionArenaInfo> arenaInformations = new List<ChampionArenaInfo>();
-                        var gameConfigState = context.Source.GetGameConfigState();
+                        var gameConfigState = AccountStateExtensions.GetGameConfigState(context.Source.AccountState);
                         var interval = gameConfigState.DailyArenaInterval;
                         var currentTicketResetCount = ArenaHelper.GetCurrentTicketResetCount(
                                         context.Source.BlockIndex!.Value, roundData.StartBlockIndex, interval);
@@ -605,13 +643,13 @@ namespace NineChronicles.Headless.GraphTypes
                             
                             var arenaInformationAdr =
                                 ArenaInformation.DeriveAddress(participant, roundData.ChampionshipId, roundData.Round);
-                            if (!context.Source.TryGetArenaInformation(arenaInformationAdr, out var arenaInformation))
+                            if (!AccountStateExtensions.TryGetArenaInformation(context.Source.AccountState, arenaInformationAdr, out var arenaInformation))
                             {
                                 continue;
                             }
                             var arenaScoreAdr =
                                     ArenaScore.DeriveAddress(participant, roundData.ChampionshipId, roundData.Round);
-                            if (!context.Source.TryGetArenaScore(arenaScoreAdr, out var arenaScore))
+                            if (!AccountStateExtensions.TryGetArenaScore(context.Source.AccountState, arenaScoreAdr, out var arenaScore))
                             {
                                 continue;
                             }
@@ -620,9 +658,9 @@ namespace NineChronicles.Headless.GraphTypes
                             {
                                 ticket = 8;
                             }
-                            var avatar = context.Source.GetAvatarStateV2(participant);
+                            var avatar = AccountStateExtensions.GetAvatarStateV2(context.Source.AccountState, participant);
                             var arenaAvatarStateAdr = ArenaAvatarState.DeriveAddress(participant);
-                            var arenaAvatarState = context.Source.GetArenaAvatarState(arenaAvatarStateAdr, avatar);
+                            var arenaAvatarState = AccountStateExtensions.GetArenaAvatarState(context.Source.AccountState, arenaAvatarStateAdr, avatar);
 
                             var characterSheet = sheets.GetSheet<CharacterSheet>();
                             if (!characterSheet.TryGetValue(avatar.characterId, out var characterRow))
@@ -634,16 +672,16 @@ namespace NineChronicles.Headless.GraphTypes
 
 
                             var runeSlotStateAddress = RuneSlotState.DeriveAddress(participant, BattleType.Arena);
-                            var runeSlotState = context.Source.TryGetState(runeSlotStateAddress, out List rawRuneSlotState)
+                            var runeSlotState = AccountStateExtensions.TryGetState(context.Source.AccountState, runeSlotStateAddress, out List rawRuneSlotState)
                                 ? new RuneSlotState(rawRuneSlotState)
                                 : new RuneSlotState(BattleType.Raid);
                             var runeListSheet = sheets.GetSheet<RuneListSheet>();
                             var runeStates = new List<RuneState>();
                             var runeSlotInfoList = runeSlotState.GetRuneSlot();
 
-                            foreach (var address in runeSlotInfoList.Select(info => RuneState.DeriveAddress(participant, info.RuneId)))
+                            foreach (var address in runeSlotInfoList.Where(info=> info.RuneId.HasValue).Select(info => RuneState.DeriveAddress(participant, info.RuneId!.Value)))
                             {
-                                if (context.Source.TryGetState(address, out List rawRuneState))
+                                if (AccountStateExtensions.TryGetState(context.Source.AccountState, address, out List rawRuneState))
                                 {
                                     runeStates.Add(new RuneState(rawRuneState));
                                }
@@ -738,7 +776,7 @@ namespace NineChronicles.Headless.GraphTypes
 
                     CombinationCrystalState combinationCrystalState = new CombinationCrystalState();
 
-                    Dictionary<Type, (Address, ISheet)> sheets = context.Source.GetSheets(sheetTypes: new[]
+                    Dictionary<Type, (Address, ISheet)> sheets = AccountStateExtensions.GetSheets(context.Source.AccountState, sheetTypes: new[]
                     {
                         typeof(CrystalHammerPointSheet),
                     });
@@ -749,7 +787,7 @@ namespace NineChronicles.Headless.GraphTypes
                     CrystalHammerPointSheet.Row? hammerPointRow = null;
                     if (existHammerPointSheet)
                     {
-                        if (context.Source.TryGetState(hammerPointAddress, out List serialized))
+                        if (AccountStateExtensions.TryGetState(context.Source.AccountState, hammerPointAddress, out List serialized))
                         {
                             hammerPointState =
                                 new HammerPointState(hammerPointAddress, serialized);
@@ -833,14 +871,14 @@ namespace NineChronicles.Headless.GraphTypes
                         var gachaStateAddress = Addresses.GetSkillStateAddressFromAvatarAddress(avatarAddress);
 
                         // Invalid Avatar address, or does not have GachaState.
-                        if (!context.Source.TryGetState(gachaStateAddress, out List rawGachaState))
+                        if (!AccountStateExtensions.TryGetState(context.Source.AccountState, gachaStateAddress, out List rawGachaState))
                         {
                             throw new FailedLoadStateException(
                                 $"Can't find {nameof(CrystalRandomSkillState)}. Gacha state address:{gachaStateAddress}");
                         }
 
                         var gachaState = new CrystalRandomSkillState(gachaStateAddress, rawGachaState);
-                        var stageBuffSheet = context.Source.GetSheet<CrystalStageBuffGachaSheet>();
+                        var stageBuffSheet = AccountStateExtensions.GetSheet<CrystalStageBuffGachaSheet>(context.Source.AccountState);
 
                         GatchaState gatchaStateResult = new GatchaState();
 
@@ -934,7 +972,7 @@ namespace NineChronicles.Headless.GraphTypes
                     var runeId = context.GetArgument<int>("runeId");
 
                     var deriveAddress = RuneState.DeriveAddress(avatarAddress, runeId);
-                    if (context.Source.TryGetState(deriveAddress, out List runes))
+                    if (AccountStateExtensions.TryGetState(context.Source.AccountState, deriveAddress, out List runes))
                     {
                         return new RuneState(runes);
                     }

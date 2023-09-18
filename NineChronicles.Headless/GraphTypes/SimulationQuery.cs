@@ -76,7 +76,7 @@ namespace NineChronicles.Headless.GraphTypes
                     var Foods = context.GetArgument<List<Guid>>("foodIds");
                     int? StageBuffId = 1;
                     //sheets
-                    var sheets = context.Source.GetSheets(
+                    var sheets = AccountStateExtensions.GetSheets(context.Source.AccountState,
                     containQuestSheet: true,
                     containSimulatorSheets: true,
                     sheetTypes: new[]
@@ -109,14 +109,14 @@ namespace NineChronicles.Headless.GraphTypes
                     }
 
                     //MyAvatar  
-                    var myAvatar = context.Source.GetAvatarStateV2(myAvatarAddress);
+                    var myAvatar = AccountStateExtensions.GetAvatarStateV2(context.Source.AccountState, myAvatarAddress);
 
                     if (!characterSheet.TryGetValue(myAvatar.characterId, out var characterRow))
                     {
                         throw new SheetRowNotFoundException("CharacterSheet", myAvatar.characterId);
                     }              
                     var myArenaAvatarStateAdr = ArenaAvatarState.DeriveAddress(myAvatarAddress);
-                    var myArenaAvatarState = context.Source.GetArenaAvatarState(myArenaAvatarStateAdr, myAvatar);
+                    var myArenaAvatarState = AccountStateExtensions.GetArenaAvatarState(context.Source.AccountState, myArenaAvatarStateAdr, myAvatar);
 
                     var myAvatarEquipments = myAvatar.inventory.Equipments;
                     var myAvatarCostumes = myAvatar.inventory.Costumes;
@@ -125,7 +125,7 @@ namespace NineChronicles.Headless.GraphTypes
                     List<Guid> myArenaCostumeList = myAvatarCostumes.Where(f=>f.equipped).Select(n => n.ItemId).ToList();
 
                     var myRuneSlotStateAddress = RuneSlotState.DeriveAddress(myAvatarAddress, BattleType.Adventure);
-                    var myRuneSlotState = context.Source.TryGetState(myRuneSlotStateAddress, out List myRawRuneSlotState)
+                    var myRuneSlotState = AccountStateExtensions.TryGetState(context.Source.AccountState, myRuneSlotStateAddress, out List myRawRuneSlotState)
                         ? new RuneSlotState(myRawRuneSlotState)
                         : new RuneSlotState(BattleType.Arena);
 
@@ -133,7 +133,7 @@ namespace NineChronicles.Headless.GraphTypes
                     var myRuneSlotInfos = myRuneSlotState.GetEquippedRuneSlotInfos();
                     foreach (var address in myRuneSlotInfos.Select(info => RuneState.DeriveAddress(myAvatarAddress, info.RuneId)))
                     {
-                        if (context.Source.TryGetState(address, out List rawRuneState))
+                        if (AccountStateExtensions.TryGetState(context.Source.AccountState, address, out List rawRuneState))
                         {
                             myRuneStates.Add(new RuneState(rawRuneState));
                         }
@@ -144,7 +144,7 @@ namespace NineChronicles.Headless.GraphTypes
                     var isNotClearedStage = !myAvatar.worldInformation.IsStageCleared(StageId);
                     var skillsOnWaveStart = new List<Skill>();
                     CrystalRandomSkillState? skillState = null;
-                    skillState = context.Source.TryGetState<List>(skillStateAddress, out var serialized)
+                    skillState = AccountStateExtensions.TryGetState<List>(context.Source.AccountState, skillStateAddress, out var serialized)
                         ? new CrystalRandomSkillState(skillStateAddress, serialized)
                         : new CrystalRandomSkillState(skillStateAddress, StageId);
                     if (skillState.SkillIds.Any())
@@ -251,7 +251,7 @@ namespace NineChronicles.Headless.GraphTypes
                     Address enemyAvatarAddress = context.GetArgument<Address>("enemyAvatarAddress");
                     int simulationCount = context.GetArgument<int>("simulationCount");
 
-                    var sheets = context.Source.GetSheets(sheetTypes: new[]
+                    var sheets = AccountStateExtensions.GetSheets(context.Source.AccountState, sheetTypes: new[]
                     {
                         typeof(ArenaSheet),
                         typeof(CostumeStatSheet),
@@ -278,8 +278,8 @@ namespace NineChronicles.Headless.GraphTypes
                         throw new Exception("arenaPercentageCalculator - Invalid simulationCount");
                     }
 
-                    var myAvatar = context.Source.GetAvatarStateV2(myAvatarAddress);
-                    var enemyAvatar = context.Source.GetAvatarStateV2(enemyAvatarAddress);
+                    var myAvatar = AccountStateExtensions.GetAvatarStateV2(context.Source.AccountState, myAvatarAddress);
+                    var enemyAvatar = AccountStateExtensions.GetAvatarStateV2(context.Source.AccountState, enemyAvatarAddress);
 
                     //sheets
                     var arenaSheets = sheets.GetArenaSimulatorSheets();
@@ -292,14 +292,14 @@ namespace NineChronicles.Headless.GraphTypes
 
                     //MyAvatar                
                     var myArenaAvatarStateAdr = ArenaAvatarState.DeriveAddress(myAvatarAddress);
-                    var myArenaAvatarState = context.Source.GetArenaAvatarState(myArenaAvatarStateAdr, myAvatar);
+                    var myArenaAvatarState = AccountStateExtensions.GetArenaAvatarState(context.Source.AccountState, myArenaAvatarStateAdr, myAvatar);
                     var myAvatarEquipments = myAvatar.inventory.Equipments;
                     var myAvatarCostumes = myAvatar.inventory.Costumes;
                     List<Guid> myArenaEquipementList = myAvatarEquipments.Where(f=>myArenaAvatarState.Equipments.Contains(f.ItemId)).Select(n => n.ItemId).ToList();
                     List<Guid> myArenaCostumeList = myAvatarCostumes.Where(f=>myArenaAvatarState.Costumes.Contains(f.ItemId)).Select(n => n.ItemId).ToList();
 
                     var myRuneSlotStateAddress = RuneSlotState.DeriveAddress(myAvatarAddress, BattleType.Arena);
-                    var myRuneSlotState = context.Source.TryGetState(myRuneSlotStateAddress, out List myRawRuneSlotState)
+                    var myRuneSlotState = AccountStateExtensions.TryGetState(context.Source.AccountState, myRuneSlotStateAddress, out List myRawRuneSlotState)
                         ? new RuneSlotState(myRawRuneSlotState)
                         : new RuneSlotState(BattleType.Arena);
 
@@ -307,7 +307,7 @@ namespace NineChronicles.Headless.GraphTypes
                     var myRuneSlotInfos = myRuneSlotState.GetEquippedRuneSlotInfos();
                     foreach (var address in myRuneSlotInfos.Select(info => RuneState.DeriveAddress(myAvatarAddress, info.RuneId)))
                     {
-                        if (context.Source.TryGetState(address, out List rawRuneState))
+                        if (AccountStateExtensions.TryGetState(context.Source.AccountState, address, out List rawRuneState))
                         {
                             myRuneStates.Add(new RuneState(rawRuneState));
                         }
@@ -315,14 +315,14 @@ namespace NineChronicles.Headless.GraphTypes
 
                     //Enemy
                     var enemyArenaAvatarStateAdr = ArenaAvatarState.DeriveAddress(enemyAvatarAddress);
-                    var enemyArenaAvatarState = context.Source.GetArenaAvatarState(enemyArenaAvatarStateAdr, enemyAvatar);
+                    var enemyArenaAvatarState = AccountStateExtensions.GetArenaAvatarState(context.Source.AccountState, enemyArenaAvatarStateAdr, enemyAvatar);
                     var enemyAvatarEquipments = enemyAvatar.inventory.Equipments;
                     var enemyAvatarCostumes = enemyAvatar.inventory.Costumes;
                     List<Guid> enemyArenaEquipementList = enemyAvatarEquipments.Where(f=>enemyArenaAvatarState.Equipments.Contains(f.ItemId)).Select(n => n.ItemId).ToList();
                     List<Guid> enemyArenaCostumeList = enemyAvatarCostumes.Where(f=>enemyArenaAvatarState.Costumes.Contains(f.ItemId)).Select(n => n.ItemId).ToList();
 
                     var enemyRuneSlotStateAddress = RuneSlotState.DeriveAddress(enemyAvatarAddress, BattleType.Arena);
-                    var enemyRuneSlotState = context.Source.TryGetState(enemyRuneSlotStateAddress, out List enemyRawRuneSlotState)
+                    var enemyRuneSlotState = AccountStateExtensions.TryGetState(context.Source.AccountState, enemyRuneSlotStateAddress, out List enemyRawRuneSlotState)
                         ? new RuneSlotState(enemyRawRuneSlotState)
                         : new RuneSlotState(BattleType.Arena);
 
@@ -330,7 +330,7 @@ namespace NineChronicles.Headless.GraphTypes
                     var enemyRuneSlotInfos = enemyRuneSlotState.GetEquippedRuneSlotInfos();
                     foreach (var address in enemyRuneSlotInfos.Select(info => RuneState.DeriveAddress(enemyAvatarAddress, info.RuneId)))
                     {
-                        if (context.Source.TryGetState(address, out List rawRuneState))
+                        if (AccountStateExtensions.TryGetState(context.Source.AccountState, address, out List rawRuneState))
                         {
                             enemyRuneStates.Add(new RuneState(rawRuneState));
                         }
@@ -424,7 +424,7 @@ namespace NineChronicles.Headless.GraphTypes
                    var states = context.Source;
 
 
-                   Dictionary<Type, (Address, ISheet)> sheets = states.GetSheets(sheetTypes: new[]
+                   Dictionary<Type, (Address, ISheet)> sheets = AccountStateExtensions.GetSheets(context.Source.AccountState, sheetTypes: new[]
                     {
                         typeof(EquipmentItemRecipeSheet),
                         typeof(EquipmentItemSheet),
@@ -438,7 +438,7 @@ namespace NineChronicles.Headless.GraphTypes
                         typeof(ConsumableItemRecipeSheet),
                     });
 
-                   if (!states.TryGetAgentAvatarStatesV2(agentAdress, avatarAddress, out var agentState,
+                   if (!AccountStateExtensions.TryGetAgentAvatarStatesV2(context.Source.AccountState, agentAdress, avatarAddress, out var agentState,
                         out var avatarState, out _))
                    {
                        throw new Exception("arenaPercentageCalculator - Invalid simulationCount");
@@ -482,7 +482,7 @@ namespace NineChronicles.Headless.GraphTypes
                    if (equipmentItemRecipeSheet[recipeId].CRYSTAL != 0)
                    {
                        var unlockedRecipeIdsAddress = avatarAddress.Derive("recipe_ids");
-                       if (!states.TryGetState(unlockedRecipeIdsAddress, out List rawIds))
+                       if (!AccountStateExtensions.TryGetState(context.Source.AccountState, unlockedRecipeIdsAddress, out List rawIds))
                        {
                            throw new FailedLoadStateException("can't find UnlockedRecipeList.");
                        }
@@ -544,7 +544,7 @@ namespace NineChronicles.Headless.GraphTypes
                    CrystalHammerPointSheet.Row? hammerPointRow = null;
                    if (existHammerPointSheet)
                    {
-                       if (states.TryGetState(hammerPointAddress, out List serialized))
+                       if (AccountStateExtensions.TryGetState(context.Source.AccountState, hammerPointAddress, out List serialized))
                        {
                            hammerPointState =
                                new HammerPointState(hammerPointAddress, serialized);
@@ -559,7 +559,7 @@ namespace NineChronicles.Headless.GraphTypes
                    long endBlockIndex = 99999999999;
                    //var isMimisbrunnrSubRecipe = subRecipeRow?.IsMimisbrunnrSubRecipe ??
                    //    subRecipeId.HasValue && recipeRow.SubRecipeIds[2] == subRecipeId.Value;
-                   var petOptionSheet = states.GetSheet<PetOptionSheet>();
+                   var petOptionSheet = AccountStateExtensions.GetSheet<PetOptionSheet>(context.Source.AccountState);
                    //bool useHammerPoint = false;
                    //if (useHammerPoint)
                    //{

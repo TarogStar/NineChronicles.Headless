@@ -10,10 +10,11 @@ using Libplanet.Types.Assets;
 using Libplanet.Action.State;
 using NineChronicles.Headless.Utils;
 using Libplanet.Types.Consensus;
+using Lib9c.Formatters;
 
 namespace NineChronicles.Headless.GraphTypes.States
 {
-    public class StateContext : IAccountStateDelta
+    public class StateContext
     {
         public StateContext(
             IAccountState accountState,
@@ -108,69 +109,10 @@ namespace NineChronicles.Headless.GraphTypes.States
 
         public FungibleAssetValueFactory FungibleAssetValueFactory { get; }
 
-        IAccountDelta IAccountStateDelta.Delta => throw new System.NotImplementedException();
-
-        IImmutableSet<(Address, Currency)> IAccountStateDelta.TotalUpdatedFungibleAssets => throw new System.NotImplementedException();
-
         public IValue? GetState(Address address) => AccountState.GetState(address);
 
         public IReadOnlyList<IValue?> GetStates(IReadOnlyList<Address> addresses) => AccountState.GetStates(addresses);
 
         public FungibleAssetValue GetBalance(Address address, Currency currency) => AccountState.GetBalance(address, currency);
-
-        public IAccountStateDelta SetState(Address address, IValue state)
-        {
-            throw new System.NotImplementedException();
-        }
-
-        public IAccountStateDelta MintAsset(Address recipient, FungibleAssetValue value)
-        {
-            throw new System.NotImplementedException();
-        }
-
-        public IAccountStateDelta TransferAsset(Address sender, Address recipient, FungibleAssetValue value, bool allowNegativeBalance = false)
-        {
-            throw new System.NotImplementedException();
-        }
-
-        public IAccountStateDelta BurnAsset(Address owner, FungibleAssetValue value)
-        {
-            throw new System.NotImplementedException();
-        }
-
-        public IAccountStateDelta TotalUpdateFungibleAssets(Address owner, FungibleAssetValue value)
-        {
-            throw new System.NotImplementedException();
-        }
-
-        public FungibleAssetValue GetTotalSupply(Currency currency)
-        {
-            throw new System.NotImplementedException();
-        }
-
-        IAccountStateDelta IAccountStateDelta.MintAsset(IActionContext context, Address recipient, FungibleAssetValue value)
-        {
-            throw new System.NotImplementedException();
-        }
-
-        IAccountStateDelta IAccountStateDelta.TransferAsset(IActionContext context, Address sender, Address recipient, FungibleAssetValue value, bool allowNegativeBalance)
-        {
-            throw new System.NotImplementedException();
-        }
-
-        IAccountStateDelta IAccountStateDelta.BurnAsset(IActionContext context, Address owner, FungibleAssetValue value)
-        {
-            throw new System.NotImplementedException();
-        }
-
-        IAccountStateDelta IAccountStateDelta.SetValidator(Validator validator)
-        {
-            throw new System.NotImplementedException();
-        }
-
-        ValidatorSet IAccountState.GetValidatorSet()
-        {
-            throw new System.NotImplementedException();
-        }
     }
 }

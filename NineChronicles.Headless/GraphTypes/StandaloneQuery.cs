@@ -55,7 +55,7 @@ namespace NineChronicles.Headless.GraphTypes
                     }
 
                     return new StateContext(
-                        chain.GetBlockState(blockHash),
+                        chain.GetAccountState(blockHash),
                         blockHash switch
                         {
                             BlockHash bh => chain[bh].Index,
@@ -85,7 +85,7 @@ namespace NineChronicles.Headless.GraphTypes
                     }
 
                     return new StateContext(
-                        chain.GetBlockState(blockHash),
+                        chain.GetAccountState(blockHash),
                         blockHash switch
                         {
                             BlockHash bh => chain[bh].Index,
@@ -170,12 +170,9 @@ namespace NineChronicles.Headless.GraphTypes
                     {
                         throw new InvalidOperationException("Previous BlockHash missing.");
                     }
-                    var states = new StateContext(
-                        chain.ToAccountBalanceGetter(previousHash),
-                        chain[previousHash.Value].Index
-                    );
+                    var accountState = chain.GetAccountState(previousHash);
 
-                    var sheets = states.GetSheets(
+                    var sheets = AccountStateExtensions.GetSheets(accountState,
                         containArenaSimulatorSheets: true,
                         sheetTypes: new[]
                         {
@@ -187,7 +184,7 @@ namespace NineChronicles.Headless.GraphTypes
                             typeof(MaterialItemSheet),
                         });
                     var myAvatarAddress = innerAction.myAvatarAddress;
-                    if (!states.TryGetAvatarStateV2(transaction.Signer, myAvatarAddress,
+                    if (!AccountStateExtensions.TryGetAvatarStateV2(accountState, transaction.Signer, myAvatarAddress,
                     out var avatarState, out var _))
                     {
                         throw new FailedLoadStateException(
@@ -196,14 +193,14 @@ namespace NineChronicles.Headless.GraphTypes
                     var myArenaAvatarStateAdr = ArenaAvatarState.DeriveAddress(myAvatarAddress);
                     var enemyAvatarAddress = innerAction.enemyAvatarAddress;
 
-                    if (!states.TryGetArenaAvatarState(myArenaAvatarStateAdr, out var myArenaAvatarState))
+                    if (!AccountStateExtensions.TryGetArenaAvatarState(accountState, myArenaAvatarStateAdr, out var myArenaAvatarState))
                     {
                         throw new Exception(
                             $"[{nameof(BattleArena)}] my avatar address : {myAvatarAddress}");
                     }
 
                     var enemyArenaAvatarStateAdr = ArenaAvatarState.DeriveAddress(enemyAvatarAddress);
-                    if (!states.TryGetArenaAvatarState(enemyArenaAvatarStateAdr,
+                    if (!AccountStateExtensions.TryGetArenaAvatarState(accountState, enemyArenaAvatarStateAdr,
                             out var enemyArenaAvatarState))
                     {
                         throw new Exception(
@@ -215,12 +212,12 @@ namespace NineChronicles.Headless.GraphTypes
                     myArenaAvatarState.UpdateCostumes(innerAction.costumes);
 
                     var ItemSlotStateAddress = ItemSlotState.DeriveAddress(myAvatarAddress, BattleType.Arena);
-                    var myItemSlotState = states.TryGetState(ItemSlotStateAddress, out List rawItemSlotState)
+                    var myItemSlotState = AccountStateExtensions.TryGetState(accountState, ItemSlotStateAddress, out List rawItemSlotState)
                         ? new ItemSlotState(rawItemSlotState)
                         : new ItemSlotState(BattleType.Arena);
-                    var AvatarState = states.GetAvatarState(myAvatarAddress);
+                    var AvatarState = AccountStateExtensions.GetAvatarState(accountState, myAvatarAddress);
                     var RuneSlotStateAddress = RuneSlotState.DeriveAddress(myAvatarAddress, BattleType.Arena);
-                    var myRuneSlotState = states.TryGetState(RuneSlotStateAddress, out List RawRuneSlotState)
+                    var myRuneSlotState = AccountStateExtensions.TryGetState(accountState, RuneSlotStateAddress, out List RawRuneSlotState)
                         ? new RuneSlotState(RawRuneSlotState)
                         : new RuneSlotState(BattleType.Arena);
 
@@ -228,7 +225,7 @@ namespace NineChronicles.Headless.GraphTypes
                     var RuneSlotInfos = myRuneSlotState.GetEquippedRuneSlotInfos();
                     foreach (var address in RuneSlotInfos.Select(info => RuneState.DeriveAddress(myAvatarAddress, info.RuneId)))
                     {
-                        if (states.TryGetState(address, out List rawRuneState))
+                        if (AccountStateExtensions.TryGetState(accountState, address, out List rawRuneState))
                         {
                             runeStates.Add(new RuneState(rawRuneState));
                         }
@@ -237,12 +234,12 @@ namespace NineChronicles.Headless.GraphTypes
                     // simulate
                     // get enemy equipped items
                     var enemyItemSlotStateAddress = ItemSlotState.DeriveAddress(enemyAvatarAddress, BattleType.Arena);
-                    var enemyItemSlotState = states.TryGetState(enemyItemSlotStateAddress, out List rawEnemyItemSlotState)
+                    var enemyItemSlotState = AccountStateExtensions.TryGetState(accountState, enemyItemSlotStateAddress, out List rawEnemyItemSlotState)
                         ? new ItemSlotState(rawEnemyItemSlotState)
                         : new ItemSlotState(BattleType.Arena);
-                    var enemyAvatarState = states.GetEnemyAvatarState(enemyAvatarAddress);
+                    var enemyAvatarState = AccountStateExtensions.GetEnemyAvatarState(accountState, enemyAvatarAddress);
                     var enemyRuneSlotStateAddress = RuneSlotState.DeriveAddress(enemyAvatarAddress, BattleType.Arena);
-                    var enemyRuneSlotState = states.TryGetState(enemyRuneSlotStateAddress, out List enemyRawRuneSlotState)
+                    var enemyRuneSlotState = AccountStateExtensions.TryGetState(accountState, enemyRuneSlotStateAddress, out List enemyRawRuneSlotState)
                         ? new RuneSlotState(enemyRawRuneSlotState)
                         : new RuneSlotState(BattleType.Arena);
 
@@ -250,7 +247,7 @@ namespace NineChronicles.Headless.GraphTypes
                     var enemyRuneSlotInfos = enemyRuneSlotState.GetEquippedRuneSlotInfos();
                     foreach (var address in enemyRuneSlotInfos.Select(info => RuneState.DeriveAddress(myAvatarAddress, info.RuneId)))
                     {
-                        if (states.TryGetState(address, out List rawRuneState))
+                        if (AccountStateExtensions.TryGetState(accountState, address, out List rawRuneState))
                         {
                             enemyRuneStates.Add(new RuneState(rawRuneState));
                         }
@@ -294,6 +291,11 @@ namespace NineChronicles.Headless.GraphTypes
 
                     var state = blockChain.GetStates(new[] { address }, blockHash)[0];
 
+                    if (state is null)
+                    {
+                        return null;
+                    }
+
                     return new Codec().Encode(state);
                 }
             );
@@ -326,39 +328,32 @@ namespace NineChronicles.Headless.GraphTypes
                     var recipient = context.GetArgument<Address?>("recipient");
 
                     IEnumerable<Transaction> txs = digest.TxIds
-                        .Select(b => new TxId(b.ToBuilder().ToArray()))
+                        .Select(bytes => new TxId(bytes))
                         .Select(store.GetTransaction);
-                    var filteredTransactions = txs.Where(tx =>
-                        tx.Actions!.Count == 1 &&
-                        ToAction(tx.Actions.First()) is ITransferAsset transferAsset &&
-                        (!recipient.HasValue || transferAsset.Recipient == recipient) &&
-                        transferAsset.Amount.Currency.Ticker == "NCG" &&
-                        store.GetTxExecution(blockHash, tx.Id) is TxSuccess);
 
-                    TransferNCGHistory ToTransferNCGHistory(TxSuccess txSuccess, string? memo)
+                    var pairs = txs
+                        .Where(tx =>
+                            tx.Actions!.Count == 1 &&
+                            store.GetTxExecution(blockHash, tx.Id) is TxSuccess)
+                        .Select(tx => (tx.Id, ToAction(tx.Actions.First())))
+                        .Where(pair =>
+                            pair.Item2 is ITransferAsset transferAssset &&
+                            transferAssset.Amount.Currency.Ticker == "NCG")
+                        .Select(pair => (pair.Item1, (ITransferAsset)pair.Item2))
+                        .Where(pair => (!(recipient is { } r) || pair.Item2.Recipient == r));
+
+                    TransferNCGHistory ToTransferNCGHistory((TxId TxId, ITransferAsset Transfer) pair)
                     {
-                        var rawTransferNcgHistories = txSuccess.FungibleAssetsDelta
-                            .Where(pair => pair.Value.Values.Any(fav => fav.Currency.Ticker == "NCG"))
-                            .Select(pair =>
-                                (pair.Key, pair.Value.Values.First(fav => fav.Currency.Ticker == "NCG")))
-                            .ToArray();
-                        var ((senderAddress, _), (recipientAddress, amount)) =
-                            rawTransferNcgHistories[0].Item2.RawValue > rawTransferNcgHistories[1].Item2.RawValue
-                                ? (rawTransferNcgHistories[1], rawTransferNcgHistories[0])
-                                : (rawTransferNcgHistories[0], rawTransferNcgHistories[1]);
                         return new TransferNCGHistory(
-                            txSuccess.BlockHash,
-                            txSuccess.TxId,
-                            senderAddress,
-                            recipientAddress,
-                            amount,
-                            memo);
+                            blockHash,
+                            pair.TxId,
+                            pair.Transfer.Sender,
+                            pair.Transfer.Recipient,
+                            pair.Transfer.Amount,
+                            pair.Transfer.Memo);
                     }
 
-                    var histories = filteredTransactions.Select(tx =>
-                        ToTransferNCGHistory((TxSuccess)store.GetTxExecution(blockHash, tx.Id),
-                            ((ITransferAsset)ToAction(tx.Actions!.Single())).Memo));
-
+                    var histories = pairs.Select(ToTransferNCGHistory);
                     return histories;
                 });
 
